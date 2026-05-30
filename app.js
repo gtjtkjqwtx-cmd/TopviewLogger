@@ -1568,8 +1568,7 @@ function flRenderLog() {
     if (v.notes) parts.push(v.notes);
     if (isStandingType(v.type)) {
       if (v.standingAction === 'taken') {
-        parts.push("Action Taken");
-        if (v.actionDescription) parts.push(v.actionDescription);
+        parts.push(v.actionDescription ? v.actionDescription : "Action Taken");
       } else if (v.standingAction === 'none') {
         parts.push("No Action Taken");
       }
@@ -1635,8 +1634,7 @@ function flGenerateReport(s) {
           if (v.notes) parts.push(v.notes);
           if (isStanding) {
             if (v.standingAction === 'taken') {
-              parts.push("Action Taken");
-              if (v.actionDescription) parts.push(v.actionDescription);
+              parts.push(v.actionDescription ? v.actionDescription : "Action Taken");
             } else if (v.standingAction === 'none') {
               parts.push("No Action Taken");
             }
@@ -1671,8 +1669,7 @@ function flGenerateReport(s) {
         let parts = [];
         if (v.notes) parts.push(v.notes);
         if (v.standingAction === 'taken') {
-          parts.push("Action Taken");
-          if (v.actionDescription) parts.push(v.actionDescription);
+          parts.push(v.actionDescription ? v.actionDescription : "Action Taken");
         } else if (v.standingAction === 'none') {
           parts.push("No Action Taken");
         }
