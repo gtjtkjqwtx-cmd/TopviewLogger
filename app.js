@@ -1259,12 +1259,20 @@ function checkSwResume() {
 }
 
 document.getElementById('sw-btn-start-new').addEventListener('click', () => {
-  swClearSession();
-  document.getElementById('sw-btn-resume').classList.add('hidden');
-  document.getElementById('sw-supervisor-name').value = '';
-  document.getElementById('sw-stop-num').value = '';
-  document.getElementById('sw-time-started').value = formatTime();
-  showView('sw-new');
+  const startNew = () => {
+    swClearSession();
+    document.getElementById('sw-btn-resume').classList.add('hidden');
+    document.getElementById('sw-supervisor-name').value = '';
+    document.getElementById('sw-stop-num').value = '';
+    document.getElementById('sw-time-started').value = formatTime();
+    showView('sw-new');
+  };
+
+  if (!document.getElementById('sw-btn-resume').classList.contains('hidden')) {
+    openConfirmModal("You already have an active report, Proceed", startNew);
+  } else {
+    startNew();
+  }
 });
 
 document.getElementById('sw-btn-resume').addEventListener('click', () => { swUpdateDisplay(); swRenderLog(); swRenderNotes(); showView('sw-session'); });
@@ -1334,8 +1342,13 @@ function swRenderLog() {
     li.className = 'log-item';
     let label = v.type;
     if (v.type === 'Bus Dispatch') { label += v.isLate ? ' (Late)' : v.noInput ? ' (No Input)' : ' (On Time)'; }
-    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${v.notes ? `<span class="log-notes">${v.type==='Bus Dispatch'?'Bus #':''}${v.notes}</span>` : ''}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm sw-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button></div>`;
+    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${v.notes ? `<span class="log-notes">${v.type==='Bus Dispatch'?'Bus #':''}${v.notes}</span>` : ''}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm sw-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm sw-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
     li.querySelector('.sw-edit-log').onclick = () => openViolationDetail('sw', v.type, idx);
+    li.querySelector('.sw-del-log').onclick = () => {
+      State.sw.session.violations.splice(idx, 1);
+      swRenderLog();
+      swSaveSession();
+    };
     list.appendChild(li);
   });
 }
@@ -1370,7 +1383,7 @@ function swGenerateReport(s) {
   r += `Stop #: ${s.stopNum}\n`;
   r += `Time Started: ${formatReportTime(s.startTime)}\n`;
   r += `Time Ended: ${formatReportTime(s.endTime)}\n\n\n`;
-  r += `VIOLATIONS LOG:\n`;
+  r += `VIOLATIONS LOG (${s.violations.length}):\n`;
   r += `---------------\n`;
   if (s.violations.length === 0) { r += 'No violations recorded.\n'; }
   else {
@@ -1381,7 +1394,7 @@ function swGenerateReport(s) {
       if (type === 'Bus Dispatch') {
         const accurate = groups[type].filter(v => !v.isLate && !v.noInput);
         const inaccurate = groups[type].filter(v => v.isLate || v.noInput);
-        if (accurate.length > 0) r += `Accurate updates to dispatch: ${accurate.map(v => `${v.notes}(${formatReportTime(v.timestamp)})`).join(', ')}\n`;
+        if (accurate.length > 0) r += `Accurate updates to dispatch: ${accurate.map(v => `${v.notes}`).join(', ')}\n`;
         if (inaccurate.length > 0) {
           r += `Inaccurate updates to dispatch: ${inaccurate.map(v => {
             const tags = []; if (v.isLate) tags.push('Late'); if (v.noInput) tags.push("Didnt Input");
@@ -1474,14 +1487,22 @@ function checkFlResume() {
 }
 
 document.getElementById('fl-btn-start-new').addEventListener('click', () => {
-  flClearSession();
-  document.getElementById('fl-btn-resume').classList.add('hidden');
-  document.getElementById('fl-bus-number').value = '';
-  document.getElementById('fl-driver-name').value = '';
-  document.getElementById('fl-route').value = '';
-  document.getElementById('fl-stop-boarded').value = '';
-  document.getElementById('fl-time-started').value = formatTime();
-  showView('fl-new');
+  const startNew = () => {
+    flClearSession();
+    document.getElementById('fl-btn-resume').classList.add('hidden');
+    document.getElementById('fl-bus-number').value = '';
+    document.getElementById('fl-driver-name').value = '';
+    document.getElementById('fl-route').value = '';
+    document.getElementById('fl-stop-boarded').value = '';
+    document.getElementById('fl-time-started').value = formatTime();
+    showView('fl-new');
+  };
+
+  if (!document.getElementById('fl-btn-resume').classList.contains('hidden')) {
+    openConfirmModal("You already have an active report, Proceed", startNew);
+  } else {
+    startNew();
+  }
 });
 document.getElementById('fl-btn-resume').addEventListener('click', () => { flUpdateDisplay(); flRenderLog(); flRenderNotes(); showView('fl-session'); });
 document.getElementById('fl-btn-view-all').addEventListener('click', () => { flRenderHistory(); showView('fl-history'); });
@@ -1762,6 +1783,29 @@ document.getElementById('btn-save-custom').addEventListener('click', () => {
 
 // --- Note Modal ---
 let noteModule = null;
+function openConfirmModal(message, onYes) {
+  const modal = document.getElementById('confirm-modal');
+  document.getElementById('confirm-modal-message').textContent = message;
+  modal.classList.add('active');
+  
+  const btnYes = document.getElementById('btn-confirm-yes');
+  const btnNo = document.getElementById('btn-confirm-no');
+  
+  // Clone to remove old listeners
+  const newBtnYes = btnYes.cloneNode(true);
+  const newBtnNo = btnNo.cloneNode(true);
+  btnYes.parentNode.replaceChild(newBtnYes, btnYes);
+  btnNo.parentNode.replaceChild(newBtnNo, btnNo);
+  
+  newBtnYes.onclick = () => {
+    modal.classList.remove('active');
+    if (onYes) onYes();
+  };
+  newBtnNo.onclick = () => {
+    modal.classList.remove('active');
+  };
+}
+
 function openNoteModal(mod) {
   noteModule = mod;
   document.getElementById('note-input').value = '';
