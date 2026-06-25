@@ -110,6 +110,11 @@
           <span>Stopwatch Report</span>
           <div class="gloss-sheen"></div>
         </button>
+        <button id="btn-goto-global-notes" class="btn-primary" style="gap:.75rem;">
+          <svg class="icon-sm"><use href="#icon-clipboard"/></svg>
+          <span>Notes</span>
+          <div class="gloss-sheen"></div>
+        </button>
         <button id="btn-goto-tracker" class="btn-primary" style="gap:.75rem;">
           <svg class="icon-sm"><use href="#icon-navigation"/></svg>
           <span>Samsara Map</span>
@@ -407,6 +412,7 @@
           <div class="header-tools">
             <button class="violation-btn-sm hud-shortcut" data-url="https://www.countif.net" title="Dispatch Portal" style="flex-shrink:0; height:28px; padding:0 10px; font-size:.7rem; margin:0; border-radius:6px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);">Dispatch</button>
             <div class="live-indicator-sm"><span class="dot pulse"></span><span>LIVE</span></div>
+            <button id="sw-btn-global-notes" class="icon-tool-btn" title="Global Notes"><svg class="icon-xs"><use href="#icon-clipboard"/></svg></button>
             <button id="sw-btn-edit-session" class="icon-tool-btn" title="Edit Session"><svg class="icon-xs"><use href="#icon-pencil"/></svg></button>
           </div>
         </div>
@@ -525,6 +531,7 @@
           <div class="header-tools">
             <button class="violation-btn-sm hud-shortcut" data-url="https://www.countif.net" title="Dispatch Portal" style="flex-shrink:0; height:28px; padding:0 10px; font-size:.7rem; margin:0; border-radius:6px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);">Dispatch</button>
             <div class="live-indicator-sm"><span class="dot pulse"></span><span>LIVE</span></div>
+            <button id="fl-btn-global-notes" class="icon-tool-btn" title="Global Notes"><svg class="icon-xs"><use href="#icon-clipboard"/></svg></button>
             <button id="fl-btn-edit-session" class="icon-tool-btn" title="Edit Session"><svg class="icon-xs"><use href="#icon-pencil"/></svg></button>
           </div>
         </div>
@@ -616,6 +623,34 @@
     </div>
   </div>
 
+  <!-- Global Notes Modal -->
+  <div id="global-notes-modal" class="modal-overlay">
+    <div class="modal card">
+      <header class="modal-header">
+        <h3>Global Notes</h3>
+        <p class="subtitle" style="margin-bottom:0;">These notes will transfer to your next report</p>
+      </header>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+        <span style="font-size:0.9rem;font-weight:600;">Saved Notes</span>
+        <button id="btn-open-global-block-input" class="btn-tertiary" style="padding:0.3rem 0.6rem;font-size:0.8rem;">+ New Note</button>
+      </div>
+
+      <div id="global-block-input-container" style="display:none; margin-bottom:1rem; border:1px solid rgba(255,255,255,0.1); padding:0.8rem; border-radius:8px; background:rgba(0,0,0,0.2);">
+        <textarea id="global-block-input" placeholder="Type note here..." rows="3" style="width:100%; border:none; background:transparent; color:#fff; outline:none; resize:vertical; margin-bottom:0.5rem; font-size:0.9rem;"></textarea>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+          <button id="btn-cancel-global-block" class="btn-secondary" style="padding:0.3rem 0.8rem; font-size:0.8rem;">Cancel</button>
+          <button id="btn-add-global-block" class="btn-primary" style="padding:0.3rem 0.8rem; font-size:0.8rem;">Add</button>
+        </div>
+      </div>
+
+      <ul id="global-block-list" class="log-list" style="max-height: 250px; overflow-y: auto; margin-bottom: 1rem;"></ul>
+
+      <div class="modal-actions">
+        <button id="btn-close-global-notes" class="btn-primary" style="width: 100%;">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Note Modal -->
   <div id="note-modal" class="modal-overlay">
     <div class="modal card">
@@ -637,6 +672,10 @@
       </header>
       <div class="input-group-row">
         <div class="input-group"><label for="detail-time-input">Time</label><input type="text" id="detail-time-input" readonly class="clickable-input" /></div>
+      </div>
+      <div id="multiple-minutes-options" style="display:none; margin-bottom:1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
+        <label style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;margin-bottom:0.5rem;"><input type="checkbox" id="check-multiple-minutes" style="width:1.2rem;height:1.2rem;"> <span>Multiple Minutes?</span></label>
+        <div id="end-time-group" class="input-group" style="display:none;"><label for="detail-end-time-input">End Time</label><input type="text" id="detail-end-time-input" readonly class="clickable-input" placeholder="Select end time" /></div>
       </div>
       <div id="bus-dispatch-options" class="input-group-row" style="display:none;gap:1rem;margin-bottom:1rem;">
         <label style="display:flex;align-items:center;gap:.5rem;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="check-late" style="width:1.2rem;height:1.2rem;"> <span>Late</span></label>

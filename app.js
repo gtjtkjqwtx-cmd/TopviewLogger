@@ -1161,7 +1161,8 @@ function openReportViewer(content, title) {
       btnAll.title = "Copy Entire Violations Log";
       btnAll.addEventListener('click', () => {
         const match = currentReportText.match(/VIOLATIONS LOG \(\d+\)\n-+\n([\s\S]*?)(?:\n\nNOTES:|\n\nCOPYABLES:|$)/);
-        const logContent = match ? match[1].trim() : '';
+        let logContent = match ? match[1].trim() : '';
+        logContent = logContent.replace(/\n(?=\[|Accurate|Inaccurate)/g, '\n\n');
         const ta = document.createElement('textarea');
         ta.value = logContent; ta.style.position = 'fixed'; ta.style.opacity = '0';
         document.body.appendChild(ta); ta.select(); document.execCommand('copy');
@@ -1229,8 +1230,10 @@ document.querySelectorAll('.hud-shortcut').forEach(btn => {
 document.getElementById('btn-copy-all-report').addEventListener('click', () => {
   const btn = document.getElementById('btn-copy-all-report');
   // FORCE textarea fallback exclusively to bypass iOS URL encoding bugs on block copy
+  let clipboardText = currentReportText;
+  clipboardText = clipboardText.replace(/\n(?=\[|Accurate|Inaccurate|COPYABLES)/g, '\n\n');
   const ta = document.createElement('textarea');
-  ta.value = currentReportText; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  ta.value = clipboardText; ta.style.position = 'fixed'; ta.style.opacity = '0';
   document.body.appendChild(ta); ta.select(); document.execCommand('copy');
   document.body.removeChild(ta);
   btn.querySelector('span').textContent = 'Copied!';
@@ -1290,7 +1293,8 @@ document.getElementById('sw-btn-confirm-start').addEventListener('click', () => 
   const time = document.getElementById('sw-time-started').value.trim();
   if (!sup || !stop) { alert('Please fill in all fields'); return; }
   State.sw.editingSavedReportIndex = null;
-  State.sw.session = { inspector: State.currentUser, supervisor: sup, stopNum: stop, startTime: time, endTime: null, violations: [], notes: [] };
+  const combinedGlobal = typeof getCombinedGlobalNotes === 'function' ? getCombinedGlobalNotes() : [];
+  State.sw.session = { inspector: State.currentUser, supervisor: sup, stopNum: stop, startTime: time, endTime: null, violations: [], notes: combinedGlobal };
   swUpdateDisplay(); swRenderLog(); swRenderNotes(); swSaveSession();
   showView('sw-session');
 });
@@ -1320,6 +1324,7 @@ document.getElementById('sw-btn-finish').addEventListener('click', () => {
     const report = swGenerateReport(State.sw.session);
     swSaveReport(State.sw.session);
     swClearSession();
+    if (typeof clearGlobalNotes === 'function') clearGlobalNotes();
     checkSwResume();
     showView('sw-dashboard');
     setTimeout(() => openReportViewer(report, `${State.sw.session.supervisor} — Stop #${State.sw.session.stopNum}`), 400);
@@ -1342,7 +1347,7 @@ function swRenderLog() {
     li.className = 'log-item';
     let label = v.type;
     if (v.type === 'Bus Dispatch') { label += v.isLate ? ' (Late)' : v.noInput ? ' (No Input)' : ' (On Time)'; }
-    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${v.notes ? `<span class="log-notes">${v.type==='Bus Dispatch'?'Bus #':''}${v.notes}</span>` : ''}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm sw-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm sw-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${v.notes ? `<span class="log-notes">${v.type==='Bus Dispatch'?'Bus #':''}${v.notes}</span>` : ''}</div><div class="log-meta"><span class="time">${(v.isMultipleMinutes && v.endTime) ? `${v.timestamp}-${v.endTime}` : v.timestamp}</span><button class="icon-btn-sm sw-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm sw-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
     li.querySelector('.sw-edit-log').onclick = () => openViolationDetail('sw', v.type, idx);
     li.querySelector('.sw-del-log').onclick = () => {
       State.sw.session.violations.splice(idx, 1);
@@ -1392,20 +1397,22 @@ function swGenerateReport(s) {
     sorted.forEach(v => { if (!groups[v.type]) groups[v.type] = []; groups[v.type].push(v); });
     Object.keys(groups).forEach(type => {
       if (type === 'Bus Dispatch') {
+        const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
         const accurate = groups[type].filter(v => !v.isLate && !v.noInput);
         const inaccurate = groups[type].filter(v => v.isLate || v.noInput);
         if (accurate.length > 0) r += `Accurate updates to dispatch: ${accurate.map(v => `${v.notes}`).join(', ')}\n`;
         if (inaccurate.length > 0) {
           r += `Inaccurate updates to dispatch: ${inaccurate.map(v => {
             const tags = []; if (v.isLate) tags.push('Late'); if (v.noInput) tags.push("Didnt Input");
-            return `${v.notes}(${formatReportTime(v.timestamp)},${tags.join('/')})`;
+            return `${v.notes}(${formatViolationTime(v)},${tags.join('/')})`;
           }).join(', ')}\n`;
         }
       } else if (type === 'Uniform') {
         const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
         if (notes) r += `${notes}\n`;
       } else {
-        const times = groups[type].map(v => { const n = v.notes ? ` (${v.notes})` : ''; return `${formatReportTime(v.timestamp)}${n}`; });
+        const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
+        const times = groups[type].map(v => { const n = v.notes ? ` (${v.notes})` : ''; return `${formatViolationTime(v)}${n}`; });
         r += `[${times.join(', ')}] || ${type}\n`;
       }
     });
@@ -1519,7 +1526,8 @@ document.getElementById('fl-btn-confirm-start').addEventListener('click', () => 
   const time = document.getElementById('fl-time-started').value.trim();
   if (!bus || !driver) { alert('Please fill in Bus Number and Driver Name'); return; }
   State.fl.editingSavedReportIndex = null;
-  State.fl.session = { inspector: State.currentUser, busNumber: bus, driverName: driver, route: route || '', stopBoarded: stop || '', startTime: time, endTime: null, violations: [], notes: [] };
+  const combinedGlobal = typeof getCombinedGlobalNotes === 'function' ? getCombinedGlobalNotes() : [];
+  State.fl.session = { inspector: State.currentUser, busNumber: bus, driverName: driver, route: route || '', stopBoarded: stop || '', startTime: time, endTime: null, violations: [], notes: combinedGlobal };
   flUpsertDriver(driver);
   flUpdateDisplay(); flRenderLog(); flRenderNotes(); flSaveSession();
   showView('fl-session');
@@ -1564,6 +1572,7 @@ document.getElementById('fl-btn-finish').addEventListener('click', () => {
     const report = flGenerateReport(State.fl.session);
     flSaveReport(State.fl.session);
     flClearSession();
+    if (typeof clearGlobalNotes === 'function') clearGlobalNotes();
     checkFlResume();
     showView('fl-dashboard');
     setTimeout(() => openReportViewer(report, `Bus ${State.fl.session.busNumber} — ${State.fl.session.driverName}`), 400);
@@ -1595,7 +1604,7 @@ function flRenderLog() {
       }
     }
     let notesHtml = parts.length > 0 ? `<span class="log-notes">(${parts.join(', ')})</span>` : '';
-    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${notesHtml}</div><div class="log-meta"><span class="time">${v.timestamp}</span><button class="icon-btn-sm fl-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.innerHTML = `<div class="log-content"><span class="type">${label}</span>${notesHtml}</div><div class="log-meta"><span class="time">${(v.isMultipleMinutes && v.endTime) ? `${v.timestamp}-${v.endTime}` : v.timestamp}</span><button class="icon-btn-sm fl-edit-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
     li.querySelector('.fl-edit-log').onclick = () => openViolationDetail('fl', v.type, idx);
     li.querySelector('.fl-del-log').onclick = () => {
       State.fl.session.violations.splice(idx, 1);
@@ -1650,6 +1659,7 @@ function flGenerateReport(s) {
         if (notes) r += `${notes}\n`; else r += `Uniform violation (${groups[type].length})\n`;
       } else {
         const isStanding = type.toLowerCase().includes('standing');
+        const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
         const times = groups[type].map(v => {
           let parts = [];
           if (v.notes) parts.push(v.notes);
@@ -1661,7 +1671,7 @@ function flGenerateReport(s) {
             }
           }
           let extra = parts.length > 0 ? ` (${parts.join(', ')})` : '';
-          return `${formatReportTime(v.timestamp)}${extra}`;
+          return `${formatViolationTime(v)}${extra}`;
         });
         r += `[${times.join(', ')}] || ${type}\n`;
       }
@@ -1686,16 +1696,20 @@ function flGenerateReport(s) {
       vGroups[v.type].push(v);
     });
     Object.keys(vGroups).forEach(type => {
+      const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
+      const isStanding = isStandingType(type);
       const times = vGroups[type].map(v => {
         let parts = [];
         if (v.notes) parts.push(v.notes);
-        if (v.standingAction === 'taken') {
-          parts.push(v.actionDescription ? v.actionDescription : "Action Taken");
-        } else if (v.standingAction === 'none') {
-          parts.push("No Action Taken");
+        if (isStanding) {
+          if (v.standingAction === 'taken') {
+            parts.push(v.actionDescription ? v.actionDescription : "Action Taken");
+          } else if (v.standingAction === 'none') {
+            parts.push("No Action Taken");
+          }
         }
         let extra = parts.length > 0 ? ` (${parts.join(', ')})` : '';
-        return `${formatReportTime(v.timestamp)}${extra}`;
+        return `${formatViolationTime(v)}${extra}`;
       });
       r += `[${times.join(', ')}] || ${type} // Bus: ${s.busNumber}, Bus Driver: ${s.driverName}\n`;
     });
@@ -1890,24 +1904,65 @@ function openViolationDetail(mod, type, editIdx = null) {
     actionDescGroup.style.display = 'none';
     if (checkHasVideo) checkHasVideo.checked = false;
   }
+  
+  // Multiple Minutes Logic
+  if (type === 'Customer standing while bus in motion' || type === 'Took off while customers standing') {
+    document.getElementById('multiple-minutes-options').style.display = 'block';
+    const isChecked = isEdit && existing.isMultipleMinutes || false;
+    document.getElementById('check-multiple-minutes').checked = isChecked;
+    document.getElementById('end-time-group').style.display = isChecked ? 'block' : 'none';
+    document.getElementById('detail-end-time-input').value = (isEdit && existing.endTime) ? existing.endTime : '';
+    document.querySelector('label[for="detail-time-input"]').textContent = isChecked ? 'Start Time' : 'Time';
+  } else {
+    document.getElementById('multiple-minutes-options').style.display = 'none';
+    document.getElementById('check-multiple-minutes').checked = false;
+    document.getElementById('end-time-group').style.display = 'none';
+    document.getElementById('detail-end-time-input').value = '';
+    document.querySelector('label[for="detail-time-input"]').textContent = 'Time';
+  }
+
   detailModal.classList.add('active');
   detailModal.dataset.currentType = type;
   setTimeout(() => detailNotes.focus(), 100);
 }
 
 detailTime.addEventListener('click', () => openTimePicker(detailTime.value, v => detailTime.value = v));
-document.getElementById('btn-cancel-detail').addEventListener('click', () => { detailModal.classList.remove('active'); checkLate.checked = false; checkNoInput.checked = false; radioNoAction.checked = false; radioActionTaken.checked = false; if (checkHasVideo) checkHasVideo.checked = false; });
+
+document.getElementById('check-multiple-minutes').addEventListener('change', (e) => {
+  document.getElementById('end-time-group').style.display = e.target.checked ? 'block' : 'none';
+  document.querySelector('label[for="detail-time-input"]').textContent = e.target.checked ? 'Start Time' : 'Time';
+  if (e.target.checked && !document.getElementById('detail-end-time-input').value) {
+    document.getElementById('detail-end-time-input').value = formatTime();
+  }
+});
+document.getElementById('detail-end-time-input').addEventListener('click', () => {
+  openTimePicker(document.getElementById('detail-end-time-input').value || formatTime(), v => document.getElementById('detail-end-time-input').value = v);
+});
+
+document.getElementById('btn-cancel-detail').addEventListener('click', () => { detailModal.classList.remove('active'); checkLate.checked = false; checkNoInput.checked = false; radioNoAction.checked = false; radioActionTaken.checked = false; if (checkHasVideo) checkHasVideo.checked = false; document.getElementById('check-multiple-minutes').checked = false; });
 document.getElementById('btn-save-detail').addEventListener('click', () => {
   const state = State[detailModule];
   const idx = state.editingViolationIndex;
   const time = detailTime.value.trim();
   const notes = detailNotes.value.trim();
   const type = idx === null ? detailModal.dataset.currentType : state.session.violations[idx].type;
+  
+  if (document.getElementById('check-multiple-minutes').checked) {
+    const et = document.getElementById('detail-end-time-input').value.trim();
+    if (!et) { alert('Please select an End Time, or uncheck "Multiple Minutes?".'); return; }
+  }
+
   const violation = {
     type: type,
     timestamp: time, notes: notes, sortMinutes: timeToMinutes(time),
     isLate: checkLate.checked, noInput: checkNoInput.checked
   };
+  
+  if (document.getElementById('check-multiple-minutes').checked) {
+    violation.isMultipleMinutes = true;
+    violation.endTime = document.getElementById('detail-end-time-input').value.trim();
+  }
+
   // Standing action fields
   if (isStandingType(type) && detailModule === 'fl') {
     if (radioActionTaken.checked) {
@@ -1978,6 +2033,87 @@ document.getElementById('btn-save-edit-session').addEventListener('click', () =>
   }
   editModal.classList.remove('active');
 });
+
+// ============================================================
+// GLOBAL NOTES LOGIC
+// ============================================================
+let globalNotesData = { blocks: [] };
+
+function loadGlobalNotes() {
+  const saved = localStorage.getItem('topview_global_notes');
+  if (saved) globalNotesData = JSON.parse(saved);
+  if (!globalNotesData.blocks) globalNotesData.blocks = [];
+}
+
+function saveGlobalNotes() { localStorage.setItem('topview_global_notes', JSON.stringify(globalNotesData)); }
+
+function renderGlobalNotesUI() {
+  const blockList = document.getElementById('global-block-list');
+  blockList.innerHTML = '';
+  
+  if (!globalNotesData.blocks || globalNotesData.blocks.length === 0) {
+    blockList.innerHTML = `<div style="text-align:center;padding:1.5rem;opacity:.4;font-size:0.8rem;">No global notes</div>`;
+    return;
+  }
+  
+  globalNotesData.blocks.forEach((blk, idx) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="log-content"><span class="log-notes">${blk}</span></div>
+                    <div class="log-meta"><button class="icon-btn-sm gl-del-log" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.querySelector('.gl-del-log').onclick = () => { globalNotesData.blocks.splice(idx, 1); saveGlobalNotes(); renderGlobalNotesUI(); };
+    blockList.appendChild(li);
+  });
+}
+
+document.getElementById('btn-open-global-block-input').addEventListener('click', () => {
+  document.getElementById('global-block-input-container').style.display = 'block';
+  document.getElementById('global-block-input').focus();
+  document.getElementById('btn-open-global-block-input').style.display = 'none';
+});
+
+document.getElementById('btn-cancel-global-block').addEventListener('click', () => {
+  document.getElementById('global-block-input-container').style.display = 'none';
+  document.getElementById('global-block-input').value = '';
+  document.getElementById('btn-open-global-block-input').style.display = 'inline-block';
+});
+
+document.getElementById('btn-add-global-block').addEventListener('click', () => {
+  const input = document.getElementById('global-block-input');
+  const val = input.value.trim();
+  if (val) {
+    if (!globalNotesData.blocks) globalNotesData.blocks = [];
+    globalNotesData.blocks.push(val); 
+    input.value = ''; 
+    saveGlobalNotes(); 
+    renderGlobalNotesUI(); 
+    document.getElementById('global-block-input-container').style.display = 'none';
+    document.getElementById('btn-open-global-block-input').style.display = 'inline-block';
+  }
+});
+
+function getCombinedGlobalNotes() {
+  return globalNotesData.blocks ? [...globalNotesData.blocks] : [];
+}
+
+function clearGlobalNotes() {
+  globalNotesData = { blocks: [] };
+  saveGlobalNotes(); renderGlobalNotesUI();
+}
+
+function openGlobalNotesModal() { 
+  loadGlobalNotes(); 
+  document.getElementById('global-block-input-container').style.display = 'none';
+  document.getElementById('btn-open-global-block-input').style.display = 'inline-block';
+  document.getElementById('global-block-input').value = '';
+  renderGlobalNotesUI(); 
+  document.getElementById('global-notes-modal').classList.add('active'); 
+}
+document.getElementById('btn-close-global-notes').addEventListener('click', () => document.getElementById('global-notes-modal').classList.remove('active'));
+document.getElementById('btn-goto-global-notes').addEventListener('click', openGlobalNotesModal);
+document.getElementById('sw-btn-global-notes').addEventListener('click', openGlobalNotesModal);
+document.getElementById('fl-btn-global-notes').addEventListener('click', openGlobalNotesModal);
+
+loadGlobalNotes();
 
 // ===== KEYBOARD SHORTCUTS =====
 window.addEventListener('keydown', e => {
