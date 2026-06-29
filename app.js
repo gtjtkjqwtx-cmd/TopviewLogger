@@ -1125,9 +1125,17 @@ function openReportViewer(content, title) {
   document.getElementById('report-viewer-title').textContent = title || 'Report';
   const body = document.getElementById('report-viewer-body');
   body.innerHTML = '';
+  let inNotesSection = false;
   const lines = content.split('\n');
-  lines.forEach(line => {
-    if (!line && lines.indexOf(line) === lines.length - 1) return; // skip trailing empty
+  lines.forEach((line, idx) => {
+    if (!line && idx === lines.length - 1) return; // skip trailing empty
+    
+    if (line.trim() === 'NOTES:') {
+      inNotesSection = true;
+    } else if (line.trim() === 'COPYABLES:' || (line.match(/^[A-Z ]+:$/) && line.trim() !== 'NOTES:')) {
+      inNotesSection = false;
+    }
+
     const row = document.createElement('div');
     row.className = 'report-line';
     const text = document.createElement('span');
@@ -1136,6 +1144,19 @@ function openReportViewer(content, title) {
     if (line.match(/^[-=]+$/)) text.classList.add('separator-line');
     text.textContent = line || ' ';
     
+    if (inNotesSection && line.trim() !== 'NOTES:' && !line.match(/^[-=]+$/)) {
+      text.contentEditable = true;
+      text.style.borderBottom = "1px dashed rgba(255, 255, 255, 0.4)";
+      text.style.padding = "2px 6px";
+      text.style.borderRadius = "4px";
+      text.style.outline = "none";
+      text.title = "Click to edit note";
+      text.addEventListener('input', () => {
+        lines[idx] = text.textContent;
+        currentReportText = lines.join('\n');
+      });
+    }
+
     const btnContainer = document.createElement('div');
     btnContainer.style.display = 'flex';
     btnContainer.style.gap = '0.5rem';
@@ -1146,7 +1167,7 @@ function openReportViewer(content, title) {
     btn.addEventListener('click', () => {
       // FORCE textarea fallback exclusively to bypass iOS URL encoding bugs on line copy
       const ta = document.createElement('textarea');
-      ta.value = line; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      ta.value = lines[idx]; ta.style.position = 'fixed'; ta.style.opacity = '0';
       document.body.appendChild(ta); ta.select(); document.execCommand('copy');
       document.body.removeChild(ta);
       btn.classList.add('copied');
@@ -1371,7 +1392,8 @@ function swRenderNotes() {
   notes.forEach((note, idx) => {
     const li = document.createElement('li');
     li.className = 'log-item';
-    li.innerHTML = `<div class="log-content"><span class="type" style="color:var(--accent);">📝 Note</span><span class="log-notes">${note}</span></div><div class="log-meta"><button class="icon-btn-sm sw-del-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.innerHTML = `<div class="log-content"><span class="type" style="color:var(--accent);">📝 Note</span><span class="log-notes">${note}</span></div><div class="log-meta"><button class="icon-btn-sm sw-edit-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm sw-del-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.querySelector('.sw-edit-note').onclick = () => openNoteModal('sw', idx);
     li.querySelector('.sw-del-note').onclick = () => {
       State.sw.session.notes.splice(idx, 1);
       swRenderNotes(); swSaveSession();
@@ -1419,10 +1441,12 @@ function swGenerateReport(s) {
   }
   // Notes section
   const notes = s.notes || [];
+  r += `\n\nNOTES:\n`;
+  r += `------\n`;
   if (notes.length > 0) {
-    r += `\n\nNOTES:\n`;
-    r += `------\n`;
     notes.forEach(n => { r += `${n}\n`; });
+  } else {
+    r += `None\n`;
   }
   return r;
 }
@@ -1595,6 +1619,7 @@ function flRenderLog() {
     li.className = 'log-item';
     let label = v.type;
     let parts = [];
+    if (v.stopNumber) parts.push(v.stopNumber);
     if (v.notes) parts.push(v.notes);
     if (isStandingType(v.type)) {
       if (v.standingAction === 'taken') {
@@ -1627,7 +1652,8 @@ function flRenderNotes() {
   notes.forEach((note, idx) => {
     const li = document.createElement('li');
     li.className = 'log-item';
-    li.innerHTML = `<div class="log-content"><span class="type" style="color:var(--accent);">📝 Note</span><span class="log-notes">${note}</span></div><div class="log-meta"><button class="icon-btn-sm fl-del-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.innerHTML = `<div class="log-content"><span class="type" style="color:var(--accent);">📝 Note</span><span class="log-notes">${note}</span></div><div class="log-meta"><button class="icon-btn-sm fl-edit-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm fl-del-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.querySelector('.fl-edit-note').onclick = () => openNoteModal('fl', idx);
     li.querySelector('.fl-del-note').onclick = () => {
       State.fl.session.notes.splice(idx, 1);
       flRenderNotes(); flSaveSession();
@@ -1657,6 +1683,15 @@ function flGenerateReport(s) {
       if (type.toLowerCase() === 'uniform') {
         const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
         if (notes) r += `${notes}\n`; else r += `Uniform violation (${groups[type].length})\n`;
+      } else if (type === 'Skipped Stop') {
+        const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
+        groups[type].forEach(v => {
+          let parts = [];
+          if (v.stopNumber) parts.push(v.stopNumber);
+          if (v.notes) parts.push(v.notes);
+          let extra = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+          r += `${formatViolationTime(v)}${extra} || Skipped Stop\n`;
+        });
       } else {
         const isStanding = type.toLowerCase().includes('standing');
         const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
@@ -1679,10 +1714,12 @@ function flGenerateReport(s) {
   }
   // Notes section
   const notes = s.notes || [];
+  r += `\n\nNOTES:\n`;
+  r += `------\n`;
   if (notes.length > 0) {
-    r += `\n\nNOTES:\n`;
-    r += `------\n`;
     notes.forEach(n => { r += `${n}\n`; });
+  } else {
+    r += `None\n`;
   }
 
   // Copyables section for video violations
@@ -1820,20 +1857,40 @@ function openConfirmModal(message, onYes) {
   };
 }
 
-function openNoteModal(mod) {
+let editingNoteIndex = null;
+function openNoteModal(mod, editIdx = null) {
   noteModule = mod;
-  document.getElementById('note-input').value = '';
+  editingNoteIndex = editIdx;
+  const state = State[noteModule];
+  if (editIdx !== null && state && state.session && state.session.notes && state.session.notes[editIdx] !== undefined) {
+    document.getElementById('note-input').value = state.session.notes[editIdx];
+  } else {
+    document.getElementById('note-input').value = '';
+  }
   document.getElementById('note-modal').classList.add('active');
   setTimeout(() => document.getElementById('note-input').focus(), 100);
 }
-document.getElementById('btn-cancel-note').addEventListener('click', () => document.getElementById('note-modal').classList.remove('active'));
+document.getElementById('btn-cancel-note').addEventListener('click', () => {
+  editingNoteIndex = null;
+  document.getElementById('note-modal').classList.remove('active');
+});
 document.getElementById('btn-save-note').addEventListener('click', () => {
   const val = document.getElementById('note-input').value.trim();
-  if (!val) return;
   document.getElementById('note-modal').classList.remove('active');
   const state = State[noteModule];
   if (!state.session.notes) state.session.notes = [];
-  state.session.notes.push(val);
+  
+  if (editingNoteIndex !== null) {
+    if (!val) {
+      state.session.notes.splice(editingNoteIndex, 1);
+    } else {
+      state.session.notes[editingNoteIndex] = val;
+    }
+    editingNoteIndex = null;
+  } else {
+    if (!val) return;
+    state.session.notes.push(val);
+  }
   if (noteModule === 'sw') { swRenderNotes(); swSaveSession(); }
   else { flRenderNotes(); flSaveSession(); }
 });
@@ -1906,7 +1963,7 @@ function openViolationDetail(mod, type, editIdx = null) {
   }
   
   // Multiple Minutes Logic
-  if (type === 'Customer standing while bus in motion' || type === 'Took off while customers standing') {
+  if (type === 'Customer standing while bus in motion' || type === 'Took off while customers standing' || type === 'Skipped Stop') {
     document.getElementById('multiple-minutes-options').style.display = 'block';
     const isChecked = isEdit && existing.isMultipleMinutes || false;
     document.getElementById('check-multiple-minutes').checked = isChecked;
@@ -1919,6 +1976,14 @@ function openViolationDetail(mod, type, editIdx = null) {
     document.getElementById('end-time-group').style.display = 'none';
     document.getElementById('detail-end-time-input').value = '';
     document.querySelector('label[for="detail-time-input"]').textContent = 'Time';
+  }
+
+  if (type === 'Skipped Stop') {
+    document.getElementById('skipped-stop-options').style.display = 'block';
+    document.getElementById('detail-stop-num-input').value = (isEdit && existing.stopNumber) ? existing.stopNumber : '';
+  } else {
+    document.getElementById('skipped-stop-options').style.display = 'none';
+    document.getElementById('detail-stop-num-input').value = '';
   }
 
   detailModal.classList.add('active');
@@ -1957,6 +2022,10 @@ document.getElementById('btn-save-detail').addEventListener('click', () => {
     timestamp: time, notes: notes, sortMinutes: timeToMinutes(time),
     isLate: checkLate.checked, noInput: checkNoInput.checked
   };
+  
+  if (type === 'Skipped Stop') {
+    violation.stopNumber = document.getElementById('detail-stop-num-input').value.trim();
+  }
   
   if (document.getElementById('check-multiple-minutes').checked) {
     violation.isMultipleMinutes = true;

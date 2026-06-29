@@ -551,6 +551,7 @@
           <button class="violation-btn-sm" data-type="Excessive Honking">Excessive Honking</button>
           <button class="violation-btn-sm" data-type="Uniform">Uniform</button>
           <button class="violation-btn-sm" data-type="Took off while customers standing">Took off standing</button>
+          <button class="violation-btn-sm" data-type="Skipped Stop">Skipped Stop</button>
           <button class="violation-btn-sm custom-btn" id="fl-btn-custom-violation">Custom +</button>
           <button class="violation-btn-sm note-btn" id="fl-btn-add-note" style="background:rgba(255,255,255,0.03); border:1px dashed rgba(255,255,255,0.15); color:var(--accent);">Note +</button>
         </div>
@@ -676,6 +677,10 @@
       <div id="multiple-minutes-options" style="display:none; margin-bottom:1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
         <label style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;margin-bottom:0.5rem;"><input type="checkbox" id="check-multiple-minutes" style="width:1.2rem;height:1.2rem;"> <span>Multiple Minutes?</span></label>
         <div id="end-time-group" class="input-group" style="display:none;"><label for="detail-end-time-input">End Time</label><input type="text" id="detail-end-time-input" readonly class="clickable-input" placeholder="Select end time" /></div>
+      </div>
+      <div id="skipped-stop-options" class="input-group" style="display:none; margin-bottom:1rem;">
+        <label for="detail-stop-num-input">Stop #</label>
+        <input type="text" id="detail-stop-num-input" placeholder="e.g. Stop 4" />
       </div>
       <div id="bus-dispatch-options" class="input-group-row" style="display:none;gap:1rem;margin-bottom:1rem;">
         <label style="display:flex;align-items:center;gap:.5rem;font-size:.8rem;cursor:pointer;"><input type="checkbox" id="check-late" style="width:1.2rem;height:1.2rem;"> <span>Late</span></label>
