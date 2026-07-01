@@ -1161,6 +1161,26 @@ function openReportViewer(content, title) {
     btnContainer.style.display = 'flex';
     btnContainer.style.gap = '0.5rem';
 
+    if (line.includes(' || ') || line.startsWith('Uniform violation')) {
+      const btnV = document.createElement('button');
+      btnV.className = 'btn-copy-line';
+      btnV.innerHTML = '<span style="font-weight:bold;font-size:0.8rem;line-height:1;">V</span>';
+      btnV.title = "Copy Violation Times/Notes Only";
+      btnV.addEventListener('click', () => {
+        let vText = lines[idx];
+        if (vText.includes(' || ')) {
+          vText = vText.split(' || ')[0].trim();
+        }
+        const ta = document.createElement('textarea');
+        ta.value = vText; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+        document.body.removeChild(ta);
+        btnV.classList.add('copied');
+        setTimeout(() => btnV.classList.remove('copied'), 1200);
+      });
+      btnContainer.appendChild(btnV);
+    }
+
     const btn = document.createElement('button');
     btn.className = 'btn-copy-line';
     btn.innerHTML = '<svg class="icon-xs"><use href="#icon-clipboard"/></svg>';
@@ -1183,7 +1203,7 @@ function openReportViewer(content, title) {
       btnAll.addEventListener('click', () => {
         const match = currentReportText.match(/VIOLATIONS LOG \(\d+\)\n-+\n([\s\S]*?)(?:\n\nNOTES:|\n\nCOPYABLES:|$)/);
         let logContent = match ? match[1].trim() : '';
-        logContent = logContent.replace(/\n(?=\[|Accurate|Inaccurate)/g, '\n\n');
+        logContent = logContent.split('\n').map(l => l.trim()).filter(Boolean).join('\n\n');
         const ta = document.createElement('textarea');
         ta.value = logContent; ta.style.position = 'fixed'; ta.style.opacity = '0';
         document.body.appendChild(ta); ta.select(); document.execCommand('copy');
@@ -1251,8 +1271,7 @@ document.querySelectorAll('.hud-shortcut').forEach(btn => {
 document.getElementById('btn-copy-all-report').addEventListener('click', () => {
   const btn = document.getElementById('btn-copy-all-report');
   // FORCE textarea fallback exclusively to bypass iOS URL encoding bugs on block copy
-  let clipboardText = currentReportText;
-  clipboardText = clipboardText.replace(/\n(?=\[|Accurate|Inaccurate|COPYABLES)/g, '\n\n');
+  let clipboardText = currentReportText.replace(/\n{3,}/g, '\n\n');
   const ta = document.createElement('textarea');
   ta.value = clipboardText; ta.style.position = 'fixed'; ta.style.opacity = '0';
   document.body.appendChild(ta); ta.select(); document.execCommand('copy');
@@ -1417,27 +1436,29 @@ function swGenerateReport(s) {
     const sorted = [...s.violations].sort((a,b) => a.sortMinutes - b.sortMinutes);
     const groups = {};
     sorted.forEach(v => { if (!groups[v.type]) groups[v.type] = []; groups[v.type].push(v); });
+    const violationLines = [];
     Object.keys(groups).forEach(type => {
       if (type === 'Bus Dispatch') {
         const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
         const accurate = groups[type].filter(v => !v.isLate && !v.noInput);
         const inaccurate = groups[type].filter(v => v.isLate || v.noInput);
-        if (accurate.length > 0) r += `Accurate updates to dispatch: ${accurate.map(v => `${v.notes}`).join(', ')}\n`;
+        if (accurate.length > 0) violationLines.push(`Accurate updates to dispatch: ${accurate.map(v => `${v.notes}`).join(', ')}`);
         if (inaccurate.length > 0) {
-          r += `Inaccurate updates to dispatch: ${inaccurate.map(v => {
+          violationLines.push(`Inaccurate updates to dispatch: ${inaccurate.map(v => {
             const tags = []; if (v.isLate) tags.push('Late'); if (v.noInput) tags.push("Didnt Input");
             return `${v.notes}(${formatViolationTime(v)},${tags.join('/')})`;
-          }).join(', ')}\n`;
+          }).join(', ')}`);
         }
       } else if (type === 'Uniform') {
         const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
-        if (notes) r += `${notes}\n`;
+        if (notes) violationLines.push(notes);
       } else {
         const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
         const times = groups[type].map(v => { const n = v.notes ? ` (${v.notes})` : ''; return `${formatViolationTime(v)}${n}`; });
-        r += `[${times.join(', ')}] || ${type}\n`;
+        violationLines.push(`[${times.join(', ')}] || ${type}`);
       }
     });
+    r += violationLines.join('\n\n') + '\n';
   }
   // Notes section
   const notes = s.notes || [];
@@ -1679,19 +1700,21 @@ function flGenerateReport(s) {
     const groups = {};
     sorted.forEach(v => { if (!groups[v.type]) groups[v.type] = []; groups[v.type].push(v); });
     const sortedKeys = Object.keys(groups).sort((a,b) => groups[a][0].sortMinutes - groups[b][0].sortMinutes);
+    const violationLines = [];
     sortedKeys.forEach(type => {
       if (type.toLowerCase() === 'uniform') {
         const notes = groups[type].map(v => v.notes).filter(n => n && n.length > 0).join(', ');
-        if (notes) r += `${notes}\n`; else r += `Uniform violation (${groups[type].length})\n`;
+        if (notes) violationLines.push(notes); else violationLines.push(`Uniform violation (${groups[type].length})`);
       } else if (type === 'Skipped Stop') {
         const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
-        groups[type].forEach(v => {
+        const entries = groups[type].map(v => {
           let parts = [];
           if (v.stopNumber) parts.push(v.stopNumber);
           if (v.notes) parts.push(v.notes);
-          let extra = parts.length > 0 ? ` (${parts.join(', ')})` : '';
-          r += `${formatViolationTime(v)}${extra} || Skipped Stop\n`;
+          let extra = parts.length > 0 ? `(${parts.join(', ')})` : '';
+          return `${formatViolationTime(v)}${extra}`;
         });
+        violationLines.push(`${entries.join(', ')} || Skipped Stop`);
       } else {
         const isStanding = type.toLowerCase().includes('standing');
         const formatViolationTime = (v) => (v.isMultipleMinutes && v.endTime) ? `${formatReportTime(v.timestamp)}-${formatReportTime(v.endTime)}` : formatReportTime(v.timestamp);
@@ -1708,9 +1731,10 @@ function flGenerateReport(s) {
           let extra = parts.length > 0 ? ` (${parts.join(', ')})` : '';
           return `${formatViolationTime(v)}${extra}`;
         });
-        r += `[${times.join(', ')}] || ${type}\n`;
+        violationLines.push(`[${times.join(', ')}] || ${type}`);
       }
     });
+    r += violationLines.join('\n\n') + '\n';
   }
   // Notes section
   const notes = s.notes || [];
@@ -1927,6 +1951,15 @@ function isStandingType(type) {
   return t.includes('standing');
 }
 
+function formatStopPrefix(val) {
+  if (!val) return '';
+  val = val.trim();
+  if (/^stop\b/i.test(val)) {
+    return val.replace(/^stop\s*/i, 'Stop ');
+  }
+  return `Stop ${val}`;
+}
+
 function openViolationDetail(mod, type, editIdx = null) {
   detailModule = mod;
   const state = State[mod];
@@ -1980,7 +2013,7 @@ function openViolationDetail(mod, type, editIdx = null) {
 
   if (type === 'Skipped Stop') {
     document.getElementById('skipped-stop-options').style.display = 'block';
-    document.getElementById('detail-stop-num-input').value = (isEdit && existing.stopNumber) ? existing.stopNumber : '';
+    document.getElementById('detail-stop-num-input').value = (isEdit && existing.rawStopInput !== undefined) ? existing.rawStopInput : ((isEdit && existing.stopNumber) ? existing.stopNumber.replace(/^Stop\s*/i, '') : '');
   } else {
     document.getElementById('skipped-stop-options').style.display = 'none';
     document.getElementById('detail-stop-num-input').value = '';
@@ -2024,7 +2057,9 @@ document.getElementById('btn-save-detail').addEventListener('click', () => {
   };
   
   if (type === 'Skipped Stop') {
-    violation.stopNumber = document.getElementById('detail-stop-num-input').value.trim();
+    const rawStop = document.getElementById('detail-stop-num-input').value.trim();
+    violation.rawStopInput = rawStop;
+    violation.stopNumber = rawStop ? formatStopPrefix(rawStop) : '';
   }
   
   if (document.getElementById('check-multiple-minutes').checked) {
