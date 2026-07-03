@@ -458,17 +458,62 @@ async function runFleetScan() {
 // COUNTIF CONNECT MODULE
 // ============================================================
 
+function openDispatchOverlayModal() {
+  const modal = document.getElementById('dispatch-overlay-modal');
+  const body = document.getElementById('dispatch-overlay-body');
+  const setupEl = document.getElementById('countif-setup');
+  const portalEl = document.getElementById('countif-portal');
+  
+  if (setupEl && portalEl && body) {
+    body.appendChild(setupEl);
+    body.appendChild(portalEl);
+  }
+  
+  if (portalSessionCookie) {
+    if (setupEl) setupEl.style.display = 'none';
+    if (portalEl) portalEl.style.display = 'block';
+    fetchDispatchData();
+  } else {
+    if (setupEl) setupEl.style.display = 'block';
+    if (portalEl) portalEl.style.display = 'none';
+  }
+  
+  if (modal) modal.classList.add('active');
+}
+
+function closeDispatchOverlayModal() {
+  const modal = document.getElementById('dispatch-overlay-modal');
+  if (modal) modal.classList.remove('active');
+  
+  const countifContainer = document.querySelector('#countif-view .container');
+  const setupEl = document.getElementById('countif-setup');
+  const portalEl = document.getElementById('countif-portal');
+  if (countifContainer && setupEl && portalEl) {
+    countifContainer.appendChild(setupEl);
+    countifContainer.appendChild(portalEl);
+  }
+}
+
+const closeOverlayBtn = document.getElementById('btn-close-dispatch-overlay');
+if (closeOverlayBtn) {
+  closeOverlayBtn.addEventListener('click', closeDispatchOverlayModal);
+}
+
+const dispatchModalEl = document.getElementById('dispatch-overlay-modal');
+if (dispatchModalEl) {
+  dispatchModalEl.addEventListener('click', (e) => {
+    if (e.target === dispatchModalEl) {
+      closeDispatchOverlayModal();
+    }
+  });
+}
+
 document.getElementById('btn-experiment').addEventListener('click', () => {
-  showView('countif');
-  countifResetDashboard();
+  openDispatchOverlayModal();
 });
 
 document.getElementById('btn-mini-dispatch').addEventListener('click', () => {
-  showView('countif');
-  // Auto-trigger sync if we have a cookie
-  if (portalSessionCookie) {
-     fetchDispatchData();
-  }
+  openDispatchOverlayModal();
 });
 
 const COUNTIF_PROXY_URL = 'https://topviewloggerr.onrender.com';
@@ -1264,9 +1309,65 @@ document.getElementById('btn-download-txt-report').addEventListener('click', () 
 // Quick Form Links in Report Viewer
 document.querySelectorAll('.hud-shortcut').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (btn.dataset.url && btn.dataset.url.includes('countif.net')) {
+      openDispatchOverlayModal();
+      return;
+    }
     window.open(btn.dataset.url, '_blank');
   });
 });
+
+// Floating Pill Drag Logic
+const dispatchPill = document.getElementById('floating-dispatch-pill');
+if (dispatchPill) {
+  let pillDragging = false;
+  let startX, startY, initialLeft, initialTop, hasMoved = false;
+
+  const onStart = (e) => {
+    pillDragging = true;
+    hasMoved = false;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    startX = clientX;
+    startY = clientY;
+    const rect = dispatchPill.getBoundingClientRect();
+    initialLeft = rect.left;
+    initialTop = rect.top;
+    dispatchPill.style.bottom = 'auto';
+    dispatchPill.style.right = 'auto';
+    dispatchPill.style.left = initialLeft + 'px';
+    dispatchPill.style.top = initialTop + 'px';
+  };
+
+  const onMove = (e) => {
+    if (!pillDragging) return;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const dx = clientX - startX;
+    const dy = clientY - startY;
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      hasMoved = true;
+    }
+    dispatchPill.style.left = (initialLeft + dx) + 'px';
+    dispatchPill.style.top = (initialTop + dy) + 'px';
+  };
+
+  const onEnd = (e) => {
+    if (!pillDragging) return;
+    pillDragging = false;
+    if (!hasMoved) {
+      openDispatchOverlayModal();
+    }
+  };
+
+  dispatchPill.addEventListener('mousedown', onStart);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onEnd);
+
+  dispatchPill.addEventListener('touchstart', onStart, { passive: true });
+  window.addEventListener('touchmove', onMove, { passive: true });
+  window.addEventListener('touchend', onEnd);
+}
 
 document.getElementById('btn-copy-all-report').addEventListener('click', () => {
   const btn = document.getElementById('btn-copy-all-report');
