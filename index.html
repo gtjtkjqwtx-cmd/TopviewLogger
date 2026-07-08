@@ -28,6 +28,7 @@
     <symbol id="icon-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
     <symbol id="icon-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></symbol>
     <symbol id="icon-navigation" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></symbol>
+    <symbol id="icon-boat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2-1a2.4 2.4 0 0 1 2-1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2-1a2.4 2.4 0 0 1 2-1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2-1"/><path d="M3 17l1.5-6h15L21 17"/><path d="M6 11V7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="10" y1="8" x2="14" y2="8"/></symbol>
   </svg>
   <style>
     /* === SAMSARA BEACON OVERRIDES === */
@@ -108,6 +109,11 @@
         <button id="btn-goto-stopwatch" class="btn-primary" style="gap:.75rem;">
           <svg class="icon-sm"><use href="#icon-clock"/></svg>
           <span>Stopwatch Report</span>
+          <div class="gloss-sheen"></div>
+        </button>
+        <button id="btn-goto-liberty" class="btn-primary" style="gap:.75rem;">
+          <svg class="icon-sm"><use href="#icon-boat"/></svg>
+          <span>Liberty Cruise</span>
           <div class="gloss-sheen"></div>
         </button>
         <button id="btn-goto-global-notes" class="btn-primary" style="gap:.75rem;">
@@ -349,6 +355,103 @@
              <span id="tracker-next-stop" class="stat-value" style="font-size: 1rem; color: var(--text-primary); font-weight: 800;">-</span>
           </div>
         </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ LIBERTY CRUISE: DASHBOARD ============ -->
+  <main id="lc-dashboard-view" class="view">
+    <div class="container container-medium">
+      <header class="view-header-row" style="margin-bottom: 2rem;">
+        <button class="icon-btn-sm btn-back" data-target="menu"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
+        <div style="flex: 1;">
+          <h1 style="margin: 0;">Liberty Cruise</h1>
+          <p class="subtitle" style="margin: 0; text-align: left;">Cruise Violation Logging</p>
+        </div>
+      </header>
+      <div class="button-stack">
+        <button id="lc-btn-resume" class="btn-accent hidden">
+          <svg class="icon-sm"><use href="#icon-refresh"/></svg>
+          <span>Resume Active Report</span>
+        </button>
+        <button id="lc-btn-start-new" class="btn-primary">
+          <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-plus"/></svg>
+          <span>Start Report</span>
+          <div class="gloss-sheen"></div>
+        </button>
+        <button id="lc-btn-view-all" class="btn-secondary">
+          <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-folder"/></svg>
+          <span>Saved Reports</span>
+        </button>
+        <button class="btn-tertiary btn-back" data-target="menu"><span>← Back to Menu</span></button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ LIBERTY CRUISE: NEW SESSION ============ -->
+  <main id="lc-new-view" class="view">
+    <div class="container container-medium card">
+      <div class="gloss-sheen"></div>
+      <header class="view-header-row">
+        <button class="icon-btn-sm btn-back" data-target="lc-dashboard"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
+        <h2>New Cruise Report</h2>
+      </header>
+      <div class="form-content">
+        <div class="input-group"><label for="lc-departure-time">Departure Time:</label><input type="text" id="lc-departure-time" readonly class="clickable-input" /></div>
+        <div class="input-group"><label for="lc-ticket-number">Ticket Number:</label><input type="text" id="lc-ticket-number" /></div>
+        <div class="input-group"><label for="lc-boat-name">Boat Name:</label><input type="text" id="lc-boat-name" /></div>
+        <div class="input-group"><label for="lc-supervisor-scanned">Supervisor That Scanned Ticket:</label><input type="text" id="lc-supervisor-scanned" /></div>
+        <button id="lc-btn-confirm-start" class="btn-primary"><span>Start Report</span><div class="gloss-sheen"></div></button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ LIBERTY CRUISE: LIVE SESSION ============ -->
+  <main id="lc-session-view" class="view session-view">
+    <div class="container container-large">
+      <div class="liquid-glass-container" style="margin-top:1rem;">
+        <div class="section-title-row">
+          <div style="display:flex; align-items:center;">
+             <button class="icon-btn-sm btn-back" style="margin-right:8px;" data-target="lc-dashboard"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
+             <h3 class="section-title" style="margin:0;">Cruise Info</h3>
+          </div>
+          <div class="header-tools">
+            <div class="live-indicator-sm"><span class="dot pulse"></span><span>LIVE</span></div>
+          </div>
+      </div>
+      <div id="lc-checklist-area" style="margin-top: 1.5rem;">
+        <!-- Checklist items rendered via JS -->
+      </div>
+      <div class="liquid-glass-container" style="margin-top: 1.5rem;">
+        <div class="section-title-wrapper" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
+          <div style="display: flex; align-items: center; gap: 0.8rem;">
+            <h3 class="section-title" style="margin: 0;">Notes</h3>
+            <button class="violation-btn-sm note-btn" id="lc-btn-add-note" style="padding: 4px 12px; font-size: 0.75rem; height: 28px; background:rgba(255,255,255,0.03); border:1px dashed rgba(255,255,255,0.15); color:var(--accent);">Note +</button>
+          </div>
+          <span id="lc-notes-count" class="count-badge">0 notes</span>
+        </div>
+        <ul id="lc-notes-list" class="log-list"></ul>
+      </div>
+      <div style="margin-top: 2rem; margin-bottom: 3rem; display: flex; flex-direction: column; gap: 1rem;">
+        <button id="lc-btn-complete" class="btn-primary" style="height: 52px; border-radius: 14px; font-weight: 800; background: var(--green); color: black; border: none;">
+          <svg class="icon-sm" style="margin-right:8px; fill: black;"><use href="#icon-check"/></svg>
+          <span style="color: black;">Complete & Save Report</span>
+          <div class="gloss-sheen" style="background: linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,0.05), rgba(0,0,0,0));"></div>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ LIBERTY CRUISE: HISTORY ============ -->
+  <main id="lc-history-view" class="view">
+    <div class="container container-large">
+      <header class="view-header-row">
+        <button class="icon-btn-sm btn-back" data-target="lc-dashboard"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
+        <h2>Cruise Reports History</h2>
+      </header>
+      <div class="log-section">
+        <div class="folder-header"><svg class="icon-sm"><use href="#icon-folder"/></svg><span>Saved Cruise Reports</span></div>
+        <ul id="lc-saved-list" class="log-list"></ul>
       </div>
     </div>
   </main>
@@ -753,6 +856,21 @@
     </div>
   </div>
 
+  <!-- Missing Fields Confirmation Modal -->
+  <div id="missing-fields-modal" class="modal-overlay">
+    <div class="modal card" style="max-width: 380px; text-align: center; padding: 2rem 1.5rem;">
+      <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(243, 156, 18, 0.15); border: 1px solid rgba(243, 156, 18, 0.4); display: flex; align-items: center; justify-content: center; margin: 0 auto 1.2rem; color: #f39c12;">
+        <svg style="width:24px; height:24px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>
+      <h3 style="margin: 0 0 0.8rem; font-size: 1.1rem; color: white;">Missing Fields, Proceed Anyway?</h3>
+      <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 1.8rem; line-height: 1.4;">Some fields or checklist items have not been answered.</p>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem;">
+        <button id="btn-missing-fields-yes" class="btn-primary" style="height: 44px; justify-content: center;">Yes</button>
+        <button id="btn-missing-fields-no" class="btn-secondary" style="height: 44px; justify-content: center;">No</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Report Viewer Modal -->
   <div id="report-viewer-modal" class="modal-overlay">
     <div class="modal card report-viewer-card">
@@ -776,12 +894,9 @@
             <span style="font-size:.65rem;">Save .txt</span>
           </button>
         </div>
-        <div style="display:flex; gap:0.3rem; justify-content:space-between; background:rgba(255,255,255,0.05); padding:0.4rem; border-radius:12px;">
+        <div id="report-viewer-forms" style="display:flex; gap:0.5rem; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.05); padding:0.5rem; border-radius:12px;">
           <span style="font-size:.6rem; color:var(--text-tertiary); font-weight:700; text-transform:uppercase; writing-mode:vertical-rl; text-orientation:mixed; transform:rotate(180deg);">Open Form</span>
-          <button class="violation-btn-sm hud-shortcut" style="height:32px; font-size:.6rem; flex:1;" data-url="https://docs.google.com/forms/d/e/1FAIpQLSdlcMExtKCdKrDjad4B4Rq1y4phVHG5nSJhY_seBxKgbQBSYw/viewform">Stopwatch</button>
-          <button class="violation-btn-sm hud-shortcut" style="height:32px; font-size:.6rem; flex:1;" data-url="https://docs.google.com/forms/d/e/1FAIpQLSfc97vaKGcC6Ijdjer5fyQ2M3qN93scHiBGDRWtD_gYhU1ROw/viewform">Full Loop</button>
-          <button class="violation-btn-sm hud-shortcut" style="height:32px; font-size:.6rem; flex:1;" data-url="https://docs.google.com/forms/d/e/1FAIpQLScBb6QmvpC1LcDZnxf8IKMP388XwmDMJCF811M1kx1TOkmcwA/viewform">Night Tour</button>
-          <button class="violation-btn-sm hud-shortcut" style="height:32px; font-size:.6rem; flex:1;" data-url="https://www.countif.net">Dispatch</button>
+          <button id="dynamic-form-btn" class="violation-btn-sm hud-shortcut" style="height:38px; font-size:.75rem; font-weight:800; flex:1;" data-url="https://docs.google.com/forms/d/e/1FAIpQLSd0zU3h4U-FJwYhm5WCInVypOJ38dHn_0CTJDlzO7acnXhNAQ/viewform">Cruise Form</button>
         </div>
       </div>
       <div class="modal-actions" style="grid-template-columns:1fr;">

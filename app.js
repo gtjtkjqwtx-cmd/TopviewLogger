@@ -44,6 +44,11 @@ const State = {
     savedReports: [],
     drivers: [] // {driverName, lastReportDate}
   },
+  // Liberty Cruise state
+  lc: {
+    session: null,
+    savedReports: []
+  },
   timePickerCallback: null
 };
 
@@ -54,7 +59,9 @@ const KEYS = {
   SW_REPORTS: 'tv_sw_reports',
   FL_SESSION: 'tv_fl_session',
   FL_REPORTS: 'tv_fl_reports',
-  FL_DRIVERS: 'tv_fl_drivers'
+  FL_DRIVERS: 'tv_fl_drivers',
+  LC_SESSION: 'tv_lc_session',
+  LC_REPORTS: 'tv_lc_reports'
 };
 
 // ===== HELPERS =====
@@ -252,7 +259,8 @@ document.getElementById('btn-save-picker').addEventListener('click', saveTimePic
 function updateStorageCount() {
   const sw = State.sw.savedReports.length;
   const fl = State.fl.savedReports.length;
-  const total = sw + fl;
+  const lc = (State.lc && State.lc.savedReports) ? State.lc.savedReports.length : 0;
+  const total = sw + fl + lc;
   const el = document.getElementById('menu-storage-count');
   if (el) el.textContent = `${total} report${total !== 1 ? 's' : ''} saved locally`;
 }
@@ -337,6 +345,7 @@ if (loginBtn) {
 // ===== MENU =====
 document.getElementById('btn-goto-stopwatch').addEventListener('click', () => { State.activeModule = 'sw'; checkSwResume(); swRenderHistory(); showView('sw-dashboard'); });
 document.getElementById('btn-goto-fullloop').addEventListener('click', () => { State.activeModule = 'fl'; checkFlResume(); flRenderHistory(); showView('fl-dashboard'); });
+document.getElementById('btn-goto-liberty').addEventListener('click', () => { State.activeModule = 'lc'; checkLcResume(); lcRenderHistory(); showView('lc-dashboard'); });
 
 // ===== TRACKER MODULE =====
 const DEFAULTS = {
@@ -1159,13 +1168,16 @@ function loadAllData() {
   if (flReports) State.fl.savedReports = JSON.parse(flReports);
   const flDrivers = localStorage.getItem(KEYS.FL_DRIVERS);
   if (flDrivers) State.fl.drivers = JSON.parse(flDrivers);
+  // LC
+  const lcReports = localStorage.getItem(KEYS.LC_REPORTS);
+  if (lcReports && State.lc) State.lc.savedReports = JSON.parse(lcReports);
   updateStorageCount();
 }
 
 // ===== REPORT VIEWER =====
 let currentReportText = '';
 
-function openReportViewer(content, title) {
+function openReportViewer(content, title, onUpdateCallback) {
   currentReportText = content;
   document.getElementById('report-viewer-title').textContent = title || 'Report';
   const body = document.getElementById('report-viewer-body');
@@ -1189,16 +1201,19 @@ function openReportViewer(content, title) {
     if (line.match(/^[-=]+$/)) text.classList.add('separator-line');
     text.textContent = line || ' ';
     
-    if (inNotesSection && line.trim() !== 'NOTES:' && !line.match(/^[-=]+$/)) {
+    if (!line.match(/^[-=]+$/) && line.trim() !== '') {
       text.contentEditable = true;
-      text.style.borderBottom = "1px dashed rgba(255, 255, 255, 0.4)";
-      text.style.padding = "2px 6px";
+      text.style.borderBottom = "1px dashed rgba(255, 255, 255, 0.25)";
+      text.style.padding = "2px 4px";
       text.style.borderRadius = "4px";
       text.style.outline = "none";
-      text.title = "Click to edit note";
+      text.title = "Click to edit line";
       text.addEventListener('input', () => {
         lines[idx] = text.textContent;
         currentReportText = lines.join('\n');
+        if (typeof onUpdateCallback === 'function') {
+          onUpdateCallback(currentReportText);
+        }
       });
     }
 
@@ -1263,6 +1278,21 @@ function openReportViewer(content, title) {
     if (line.trim()) row.appendChild(btnContainer);
     body.appendChild(row);
   });
+
+  const formBtn = document.getElementById('dynamic-form-btn');
+  if (formBtn) {
+    if ((title && title.includes('Stopwatch')) || content.includes('STOPWATCH')) {
+      formBtn.textContent = 'Stopwatch Form';
+      formBtn.dataset.url = 'https://docs.google.com/forms/d/e/1FAIpQLSdlcMExtKCdKrDjad4B4Rq1y4phVHG5nSJhY_seBxKgbQBSYw/viewform';
+    } else if ((title && title.includes('Bus ')) || content.includes('FULL LOOP')) {
+      formBtn.textContent = 'Full Loop Form';
+      formBtn.dataset.url = 'https://docs.google.com/forms/d/e/1FAIpQLSfc97vaKGcC6Ijdjer5fyQ2M3qN93scHiBGDRWtD_gYhU1ROw/viewform';
+    } else {
+      formBtn.textContent = 'Cruise Form';
+      formBtn.dataset.url = 'https://docs.google.com/forms/d/e/1FAIpQLSd0zU3h4U-FJwYhm5WCInVypOJ38dHn_0CTJDlzO7acnXhNAQ/viewform';
+    }
+  }
+
   document.getElementById('report-viewer-modal').classList.add('active');
 }
 
@@ -1278,6 +1308,8 @@ document.getElementById('btn-share-report').addEventListener('click', () => {
     navigator.share({
       title: document.getElementById('report-viewer-title').textContent,
       text: currentReportText
+    }).then(() => {
+      document.getElementById('report-viewer-modal').classList.remove('active');
     }).catch(() => {});
   } else {
     alert("Export not supported on this device/browser.");
@@ -1292,6 +1324,8 @@ document.getElementById('btn-download-txt-report').addEventListener('click', () 
     navigator.share({
       files: [file],
       title: `${title} Report`,
+    }).then(() => {
+      document.getElementById('report-viewer-modal').classList.remove('active');
     }).catch(err => console.log('Share canceled', err));
   } else {
     // Fallback if File sharing is disabled
@@ -1303,6 +1337,7 @@ document.getElementById('btn-download-txt-report').addEventListener('click', () 
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
+    document.getElementById('report-viewer-modal').classList.remove('active');
   }
 });
 
@@ -2017,7 +2052,8 @@ document.getElementById('btn-save-note').addEventListener('click', () => {
     state.session.notes.push(val);
   }
   if (noteModule === 'sw') { swRenderNotes(); swSaveSession(); }
-  else { flRenderNotes(); flSaveSession(); }
+  else if (noteModule === 'fl') { flRenderNotes(); flSaveSession(); }
+  else if (noteModule === 'lc') { lcRenderNotes(); lcSaveSessionToStorage(); }
 });
 
 // --- Violation Detail ---
@@ -2350,5 +2386,609 @@ if (portalSessionCookie) {
   countifSetBadge('Synced', 'green');
   fetchDispatchData(); 
 }
+// ============================================================
+// LIBERTY CRUISE MODULE
+// ============================================================
+
+const LC_CHECKLIST_ITEMS = [
+  { id: 'statue_duration', label: 'Duration Spent At Statue', type: 'duration' },
+  { id: 'wristbands', label: 'Gave Premium Wristbands', type: 'YN' },
+  { id: 'life_jacket', label: 'Supervisor behind fence wore Life Jacket', type: 'YN', extraOn: 'No', extraLabel: 'Their Name:' },
+  { id: 'took_cash', label: 'Supervisor Took Cash on the Pier', type: 'YN', extraOn: 'Yes', extraLabel: 'Time & Name:' },
+  { id: 'board_step', label: 'Announced Watch Step/Head While Boarding', type: 'ASN' },
+  { id: 'board_greet', label: 'Crew Greeted Upon Boarding:', type: 'ASN' },
+  { id: 'deboard_thank', label: 'Crew Thanked Upon DeBoarding:', type: 'ASN' },
+  { id: 'crew_smile', label: 'Crew Smiled', type: 'ASN' },
+  { id: 'cap_welcome', label: 'Welcome Message by Captain:', type: 'YN' },
+  { id: 'cap_safety', label: 'Safety Message by Captain:', type: 'YN' },
+  { id: 'crew_interact', label: 'Crew interacted with customers:', type: 'ASN' },
+  { id: 'uniforms', label: 'Uniforms', type: 'YN' },
+  { id: 'crew_breaks', label: 'Crew Breaks on schedule', type: 'YN' },
+  { id: 'crew_eating', label: 'Crew Eating outside of wheel house', type: 'ASN', invertColor: true },
+  { id: 'phone_usage', label: 'Phone usage outside of wheel house', type: 'ASN', invertColor: true },
+  { id: 'crew_tips', label: 'Crew asking customer for tips', type: 'YN', invertColor: true },
+  { id: 'vip_section', label: 'VIP Section Correct', type: 'YN' },
+  { id: 'restrooms_clean', label: 'Restrooms Clean', type: 'YN' },
+  { id: 'deck_clean', label: 'Deck/Floor Cleanliness', type: 'YN' },
+  { id: 'windows_clean', label: 'Windows Cleanliness', type: 'YN' },
+  { id: 'temp_drinks', label: 'Temp of Drinks', type: 'TEMP' },
+  { id: 'liquor_id', label: 'Asking ID for Liquor', type: 'YN', extraOn: 'No', extraLabel: 'Their name:' },
+  { id: 'menu_prices', label: 'Menu with prices at concession stand', type: 'YN' },
+  { id: 'concession_uniforms', label: 'Concession Uniforms', type: 'YN' },
+  { id: 'music_boarding', label: 'Music played when boarding', type: 'YN' },
+  { id: 'music_deboarding', label: 'Music played when deboarding', type: 'YN' },
+  { id: 'music_statue_pier', label: 'Music played from the statue to the pier', type: 'YN' },
+  { id: 'tg_tour', label: 'Tour guide giving tour entire time', type: 'YN' },
+  { id: 'tg_phone', label: 'Tour guide phone use', type: 'YN', invertColor: true },
+  { id: 'tg_uniform', label: 'Tour guide uniform', type: 'YN' }
+];
+
+let lcActiveDropdownId = null;
+
+function lcSaveSessionToStorage() {
+  if (State.lc && State.lc.session) {
+    localStorage.setItem(KEYS.LC_SESSION, JSON.stringify(State.lc.session));
+  }
+}
+
+function checkLcResume() {
+  const saved = localStorage.getItem(KEYS.LC_SESSION);
+  const btn = document.getElementById('lc-btn-resume');
+  if (!btn) return;
+  if (saved) {
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+  }
+}
+
+function lcCalculateDuration(startStr, endStr) {
+  if (!startStr || !endStr) return null;
+  const parseTime = (str) => {
+    const m = str.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!m) return null;
+    let h = parseInt(m[1]);
+    const min = parseInt(m[2]);
+    const p = m[3].toUpperCase();
+    if (p === 'PM' && h !== 12) h += 12;
+    if (p === 'AM' && h === 12) h = 0;
+    return h * 60 + min;
+  };
+  const sMin = parseTime(startStr);
+  const eMin = parseTime(endStr);
+  if (sMin === null || eMin === null) return null;
+  let diff = eMin - sMin;
+  if (diff < 0) diff += 24 * 60;
+  return diff;
+}
+
+function lcIsPositiveAnswer(item, answer) {
+  if (!answer || answer === '---') return false;
+  if (item.type === 'duration') return true;
+  if (item.invertColor) {
+    if (item.type === 'YN') return answer === 'No';
+    if (item.type === 'ASN') return answer === 'None';
+  } else {
+    if (item.type === 'YN') return answer === 'Yes';
+    if (item.type === 'ASN') return answer === 'All';
+    if (item.type === 'TEMP') return answer === 'Cold' || answer === 'Cold With Ice';
+  }
+  return false;
+}
+
+window.lcUpdatePreField = function(field, val) {
+  if (!State.lc.session) return;
+  State.lc.session[field] = val;
+  lcSaveSessionToStorage();
+};
+
+window.lcManualSavePreInfo = function(btn) {
+  if (!State.lc.session) return;
+  const card = btn.closest('div').parentElement;
+  if (card) {
+    const inputs = card.querySelectorAll('input');
+    if (inputs.length >= 4) {
+      State.lc.session.boat = inputs[0].value.trim();
+      State.lc.session.depart = inputs[1].value.trim();
+      State.lc.session.ticket = inputs[2].value.trim();
+      State.lc.session.supervisor = inputs[3].value.trim();
+    }
+  }
+  lcSaveSessionToStorage();
+  
+  if (State.lc.editingSavedReportIndex !== null && State.lc.editingSavedReportIndex !== undefined && State.lc.editingSavedReportIndex >= 0) {
+    const saved = State.lc.savedReports[State.lc.editingSavedReportIndex];
+    if (saved) {
+      saved.boat = State.lc.session.boat;
+      saved.depart = State.lc.session.depart;
+      saved.ticket = State.lc.session.ticket;
+      saved.supervisor = State.lc.session.supervisor;
+      saved.items = State.lc.session.items || {};
+      saved.title = `Liberty Cruise - ${saved.boat || 'Boat'} - ${saved.depart || ''}`;
+      saved.auditText = lcGenerateAuditText(State.lc.session);
+      localStorage.setItem(KEYS.LC_REPORTS, JSON.stringify(State.lc.savedReports));
+    }
+  }
+
+  const originalHtml = btn.innerHTML;
+  btn.style.background = '#2ecc71';
+  btn.style.color = 'white';
+  btn.innerHTML = '<svg class="icon-xs"><use href="#icon-check"/></svg>Saved!';
+  setTimeout(() => {
+    btn.style.background = '';
+    btn.style.color = '';
+    btn.innerHTML = originalHtml;
+  }, 1200);
+};
+
+window.lcOpenDepartPicker = function() {
+  if (!State.lc.session) return;
+  const currentVal = State.lc.session.depart || formatTime();
+  openTimePicker(currentVal, (val) => {
+    if (!State.lc.session) return;
+    State.lc.session.depart = val;
+    lcSaveSessionToStorage();
+    const departInput = document.getElementById('lc-pre-depart');
+    if (departInput) departInput.value = val;
+  });
+};
+
+function lcRenderChecklist() {
+  const container = document.getElementById('lc-checklist-area');
+  if (!container) return;
+  if (!State.lc || !State.lc.session) { container.innerHTML = ''; return; }
+  
+  if (!State.lc.session.items) State.lc.session.items = {};
+  const itemsMap = State.lc.session.items;
+
+  let html = `
+    <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
+        <span style="font-size: 0.75rem; font-weight: 800; color: var(--green); text-transform: uppercase; letter-spacing: 1px;">Cruise Pre-Logging Info</span>
+        <button type="button" class="btn-primary" style="padding: 4px 12px; font-size: 0.7rem; font-weight: 800; border-radius: 6px; height: 26px; display: flex; align-items: center; gap: 4px;" onclick="lcManualSavePreInfo(this)"><svg class="icon-xs"><use href="#icon-check"/></svg>Save Info</button>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; font-size: 0.85rem;">
+        <div>
+          <label style="color: rgba(255,255,255,0.5); display:block; font-size:0.7rem; margin-bottom:3px;">Boat Name</label>
+          <input type="text" value="${State.lc.session.boat || ''}" placeholder="Boat Name" style="width: 100%; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.85rem; font-weight: 700;" oninput="lcUpdatePreField('boat', this.value)" />
+        </div>
+        <div>
+          <label style="color: rgba(255,255,255,0.5); display:block; font-size:0.7rem; margin-bottom:3px;">Departure Time</label>
+          <input type="text" id="lc-pre-depart" readonly value="${State.lc.session.depart || ''}" placeholder="Tap to pick" class="clickable-input" style="width: 100%; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.85rem; font-weight: 700; cursor: pointer; text-align: center;" onclick="lcOpenDepartPicker()" />
+        </div>
+        <div>
+          <label style="color: rgba(255,255,255,0.5); display:block; font-size:0.7rem; margin-bottom:3px;">Ticket Number</label>
+          <input type="text" value="${State.lc.session.ticket || ''}" placeholder="Ticket Number" style="width: 100%; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.85rem; font-weight: 700;" oninput="lcUpdatePreField('ticket', this.value)" />
+        </div>
+        <div>
+          <label style="color: rgba(255,255,255,0.5); display:block; font-size:0.7rem; margin-bottom:3px;">Supervisor Scanned</label>
+          <input type="text" value="${State.lc.session.supervisor || ''}" placeholder="Supervisor Name" style="width: 100%; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.85rem; font-weight: 700;" oninput="lcUpdatePreField('supervisor', this.value)" />
+        </div>
+      </div>
+    </div>
+  `;
+
+  LC_CHECKLIST_ITEMS.forEach(item => {
+    const itemData = itemsMap[item.id] || {};
+    const answer = itemData.answer || '---';
+    const isExpanded = lcActiveDropdownId === item.id;
+    const isAnswered = answer && answer !== '---';
+    const isPositive = lcIsPositiveAnswer(item, answer);
+
+    let badgeColor = 'rgba(255,255,255,0.15)';
+    let badgeText = 'Tap to select';
+    let badgeBorder = 'rgba(255,255,255,0.3)';
+    let textColor = 'white';
+
+    if (isAnswered) {
+      badgeText = answer;
+      if (item.type === 'duration') {
+        badgeColor = 'rgba(46, 204, 113, 0.2)';
+        badgeBorder = '#2ecc71';
+        textColor = '#2ecc71';
+      } else if (isPositive) {
+        badgeColor = 'rgba(46, 204, 113, 0.2)';
+        badgeBorder = '#2ecc71';
+        textColor = '#2ecc71';
+      } else {
+        badgeColor = 'rgba(231, 76, 60, 0.25)';
+        badgeBorder = '#e74c3c';
+        textColor = '#e74c3c';
+      }
+    }
+
+    html += `
+    <div class="lc-item-card" data-id="${item.id}" style="background: ${isExpanded ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)'}; border: 1px solid ${isExpanded ? 'var(--green)' : 'rgba(255,255,255,0.08)'}; border-radius: 12px; padding: 1rem; margin-bottom: 0.8rem; cursor: pointer; transition: all 0.2s ease; box-shadow: ${isExpanded ? '0 4px 20px rgba(0,0,0,0.4)' : 'none'};">
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+        <span style="font-size: 0.85rem; font-weight: 600; color: white;">${item.label}</span>
+        <div style="background: ${badgeColor}; border: 1px solid ${badgeBorder}; color: ${textColor}; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; display: flex; align-items: center; gap: 6px;">
+          <span>${badgeText}</span>
+          <svg class="icon-xs" style="fill: ${textColor}; transform: ${isExpanded ? 'rotate(180deg)' : 'rotate(0deg)'}; transition: transform 0.2s;"><use href="#icon-chevron-down"/></svg>
+        </div>
+      </div>
+    `;
+
+    if (isExpanded) {
+      if (item.type === 'duration') {
+        html += `
+        <div style="margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 0.8rem;" onclick="event.stopPropagation();">
+          <div style="display: flex; gap: 0.8rem;">
+            <div style="flex: 1;">
+              <label style="font-size: 0.65rem; color: rgba(255,255,255,0.5); display: block; margin-bottom: 4px;">Start Time:</label>
+              <input type="text" readonly value="${itemData.startTime || ''}" placeholder="Tap to pick" class="clickable-input" style="width: 100%; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.8rem; text-align: center; cursor: pointer;" onclick="lcOpenDurationPicker('${item.id}', 'startTime')" />
+            </div>
+            <div style="flex: 1;">
+              <label style="font-size: 0.65rem; color: rgba(255,255,255,0.5); display: block; margin-bottom: 4px;">End Time:</label>
+              <input type="text" readonly value="${itemData.endTime || ''}" placeholder="Tap to pick" class="clickable-input" style="width: 100%; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 0.8rem; text-align: center; cursor: pointer;" onclick="lcOpenDurationPicker('${item.id}', 'endTime')" />
+            </div>
+          </div>
+        </div>
+        `;
+      } else {
+        let options = [];
+        if (item.type === 'YN') options = ['Yes', 'No'];
+        if (item.type === 'ASN') options = ['All', 'Some', 'None'];
+        if (item.type === 'TEMP') options = ['Cold', 'Cold With Ice', 'Not cold'];
+
+        html += `
+        <div style="margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid rgba(255,255,255,0.1); display: flex; gap: 0.6rem; flex-wrap: wrap;" onclick="event.stopPropagation();">
+          ${options.map(opt => {
+            const isSel = answer === opt;
+            return `<button class="btn-primary" style="flex: 1; min-width: 80px; height: 40px; border-radius: 8px; font-size: 0.75rem; background: ${isSel ? 'var(--green)' : 'rgba(255,255,255,0.08)'}; color: ${isSel ? 'black' : 'white'}; border: 1px solid ${isSel ? 'var(--green)' : 'rgba(255,255,255,0.15)'}; font-weight: ${isSel ? '800' : '600'}; cursor: pointer;" onclick="lcSelectOption('${item.id}', '${opt}')">${opt}</button>`;
+          }).join('')}
+        </div>
+        `;
+      }
+    }
+
+    if (item.extraOn && answer === item.extraOn) {
+      html += `
+      <div style="margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px dashed rgba(255,255,255,0.15); display: flex; flex-direction: column; gap: 4px;" onclick="event.stopPropagation();">
+        <label style="font-size: 0.7rem; color: #f39c12; font-weight: 700;">${item.extraLabel}</label>
+        <input type="text" value="${itemData.extra || ''}" placeholder="Enter details..." style="width: 100%; padding: 8px 12px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid #f39c12; color: white; font-size: 0.8rem;" oninput="lcUpdateExtra('${item.id}', this.value)" />
+      </div>
+      `;
+    }
+
+    html += `</div>`;
+  });
+
+  container.innerHTML = html;
+
+  container.querySelectorAll('.lc-item-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const id = card.getAttribute('data-id');
+      lcActiveDropdownId = (lcActiveDropdownId === id) ? null : id;
+      lcRenderChecklist();
+    });
+  });
+}
+
+window.lcSelectOption = function(itemId, opt) {
+  if (!State.lc.session) return;
+  if (!State.lc.session.items[itemId]) State.lc.session.items[itemId] = {};
+  State.lc.session.items[itemId].answer = opt;
+  lcSaveSessionToStorage();
+  lcRenderChecklist();
+};
+
+window.lcOpenDurationPicker = function(itemId, field) {
+  if (!State.lc.session) return;
+  if (!State.lc.session.items[itemId]) State.lc.session.items[itemId] = {};
+  const currentVal = State.lc.session.items[itemId][field] || formatTime();
+  openTimePicker(currentVal, (val) => {
+    if (!State.lc.session) return;
+    if (!State.lc.session.items[itemId]) State.lc.session.items[itemId] = {};
+    State.lc.session.items[itemId][field] = val;
+    const sTime = State.lc.session.items[itemId].startTime;
+    const eTime = State.lc.session.items[itemId].endTime;
+    if (sTime && eTime) {
+      const mins = lcCalculateDuration(sTime, eTime);
+      State.lc.session.items[itemId].answer = (mins !== null) ? `${mins} mins (${sTime} - ${eTime})` : `(${sTime} - ${eTime})`;
+    } else if (sTime || eTime) {
+      State.lc.session.items[itemId].answer = `Start: ${sTime || '---'} | End: ${eTime || '---'}`;
+    }
+    lcSaveSessionToStorage();
+    lcRenderChecklist();
+  });
+};
+
+window.lcUpdateExtra = function(itemId, val) {
+  if (!State.lc.session) return;
+  if (!State.lc.session.items[itemId]) State.lc.session.items[itemId] = {};
+  State.lc.session.items[itemId].extra = val;
+  lcSaveSessionToStorage();
+};
+
+function lcRenderNotes() {
+  const list = document.getElementById('lc-notes-list');
+  const badge = document.getElementById('lc-notes-count');
+  if (!list || !badge) return;
+  if (!State.lc || !State.lc.session) {
+    list.innerHTML = '';
+    badge.textContent = '0 notes';
+    return;
+  }
+  const notes = State.lc.session.notes || [];
+  badge.textContent = `${notes.length} note${notes.length !== 1 ? 's' : ''}`;
+  list.innerHTML = '';
+  if (notes.length === 0) {
+    list.innerHTML = `<div style="text-align:center;padding:2rem 1rem;opacity:.3;"><p style="font-size:.75rem;">No notes added</p></div>`;
+    return;
+  }
+  notes.forEach((note, idx) => {
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    li.innerHTML = `<div class="log-content"><span class="type" style="color:var(--accent);">📝 Note</span><span class="log-notes">${note}</span></div><div class="log-meta"><button class="icon-btn-sm lc-edit-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button><button class="icon-btn-sm lc-del-note" data-idx="${idx}"><svg class="icon-sm"><use href="#icon-x"/></svg></button></div>`;
+    li.querySelector('.lc-edit-note').onclick = () => openNoteModal('lc', idx);
+    li.querySelector('.lc-del-note').onclick = () => {
+      State.lc.session.notes.splice(idx, 1);
+      lcRenderNotes(); lcSaveSessionToStorage();
+    };
+    list.appendChild(li);
+  });
+}
+
+function lcGenerateAuditText(session) {
+  let text = `=========================================
+LIBERTY CRUISE INSPECTION REPORT
+=========================================
+Departure Time: ${session.depart || '-'}
+Ticket Number: ${session.ticket || '-'}
+Boat Name: ${session.boat || '-'}
+Supervisor That Scanned Ticket: ${session.supervisor || '-'}
+
+-----------------------------------------
+CHECKLIST
+-----------------------------------------
+`;
+
+  const itemsMap = session.items || {};
+
+  LC_CHECKLIST_ITEMS.forEach(item => {
+    const itemData = itemsMap[item.id] || {};
+    const ans = itemData.answer || '---';
+    let extraStr = '';
+    if (item.extraOn && ans === item.extraOn && itemData.extra) {
+      extraStr = ` ^ ${item.extraLabel} ${itemData.extra}`;
+    }
+    text += `${item.label} || ${ans}${extraStr}\n`;
+  });
+
+  if (session.notes && session.notes.length > 0) {
+    text += `\n\nNOTES:\n`;
+    text += `-----------------------------------------\n`;
+    session.notes.forEach((note, i) => {
+      text += `${i + 1}. ${note}\n`;
+    });
+  }
+
+  return text;
+}
+
+function lcRenderHistory() {
+  const list = document.getElementById('lc-saved-list');
+  if (!list) return;
+  list.innerHTML = '';
+  const reports = State.lc.savedReports || [];
+  if (reports.length === 0) {
+    list.innerHTML = `<li class="subtitle" style="text-align:center;padding:2rem;">No saved cruise reports found.</li>`;
+    return;
+  }
+  reports.forEach((r, idx) => {
+    const li = document.createElement('li');
+    li.className = 'log-item';
+    li.style.cursor = 'pointer';
+    li.innerHTML = `
+      <div class="log-content">
+        <span class="type">${r.boat || 'Liberty Cruise'}</span>
+        <span class="log-notes">Ticket #${r.ticket || '-'} • Depart: ${r.depart || '-'}</span>
+      </div>
+      <div class="log-meta">
+        <button class="icon-btn-sm lc-view-btn" title="View Report"><svg class="icon-sm"><use href="#icon-clipboard"/></svg></button>
+        <button class="icon-btn-sm lc-edit-btn" title="Edit Report & Checklist"><svg class="icon-sm"><use href="#icon-pencil"/></svg></button>
+        <button class="icon-btn-sm lc-del-btn" title="Delete"><svg class="icon-sm"><use href="#icon-trash"/></svg></button>
+      </div>
+    `;
+    const openViewer = () => openReportViewer(r.auditText, r.title || `Liberty Cruise — ${r.boat}`, (updatedText) => {
+      r.auditText = updatedText;
+      localStorage.setItem(KEYS.LC_REPORTS, JSON.stringify(State.lc.savedReports));
+    });
+    li.querySelector('.lc-view-btn').onclick = (e) => { e.stopPropagation(); openViewer(); };
+    li.querySelector('.log-content').onclick = openViewer;
+    li.querySelector('.lc-edit-btn').onclick = (e) => {
+      e.stopPropagation();
+      State.lc.session = {
+        id: r.id || Date.now().toString(),
+        depart: r.depart || '',
+        ticket: r.ticket || '',
+        boat: r.boat || '',
+        supervisor: r.supervisor || '',
+        items: r.items ? JSON.parse(JSON.stringify(r.items)) : {},
+        notes: r.notes ? JSON.parse(JSON.stringify(r.notes)) : []
+      };
+      State.lc.editingSavedReportIndex = idx;
+      lcRenderChecklist();
+      lcRenderNotes();
+      showView('lc-session');
+    };
+    li.querySelector('.lc-del-btn').onclick = (e) => {
+      e.stopPropagation();
+      if (confirm('Delete this cruise report?')) {
+        State.lc.savedReports.splice(idx, 1);
+        localStorage.setItem(KEYS.LC_REPORTS, JSON.stringify(State.lc.savedReports));
+        updateStorageCount();
+        lcRenderHistory();
+      }
+    };
+    list.appendChild(li);
+  });
+}
+
+document.getElementById('lc-btn-resume')?.addEventListener('click', () => {
+  const saved = localStorage.getItem(KEYS.LC_SESSION);
+  if (saved) {
+    State.lc.session = JSON.parse(saved);
+    if (!State.lc.session.notes) State.lc.session.notes = [];
+    lcRenderChecklist();
+    lcRenderNotes();
+    showView('lc-session');
+  }
+});
+
+document.getElementById('lc-btn-start-new')?.addEventListener('click', () => {
+  const startNewLc = () => {
+    State.lc.session = null;
+    localStorage.removeItem(KEYS.LC_SESSION);
+    document.getElementById('lc-btn-resume').classList.add('hidden');
+    document.getElementById('lc-departure-time').value = formatTime();
+    document.getElementById('lc-ticket-number').value = '';
+    document.getElementById('lc-boat-name').value = '';
+    document.getElementById('lc-supervisor-scanned').value = '';
+    showView('lc-new');
+  };
+
+  const saved = localStorage.getItem(KEYS.LC_SESSION);
+  if (saved) {
+    openConfirmModal("You already have an active cruise report, Proceed", startNewLc);
+  } else {
+    startNewLc();
+  }
+});
+
+document.getElementById('lc-departure-time')?.addEventListener('click', () => {
+  openTimePicker(document.getElementById('lc-departure-time').value, (val) => {
+    document.getElementById('lc-departure-time').value = val;
+  });
+});
+
+document.getElementById('lc-btn-view-all')?.addEventListener('click', () => {
+  lcRenderHistory();
+  showView('lc-history');
+});
+
+document.getElementById('lc-btn-add-note')?.addEventListener('click', () => {
+  openNoteModal('lc');
+});
+
+document.getElementById('lc-btn-confirm-start')?.addEventListener('click', () => {
+  const depart = document.getElementById('lc-departure-time').value.trim();
+  const ticket = document.getElementById('lc-ticket-number').value.trim();
+  const boat = document.getElementById('lc-boat-name').value.trim();
+  const sup = document.getElementById('lc-supervisor-scanned').value.trim();
+
+  if (!depart || !ticket || !boat || !sup) {
+    alert('Please fill in all fields.');
+    return;
+  }
+
+  State.lc.session = {
+    id: Date.now().toString(),
+    depart, ticket, boat, supervisor: sup,
+    items: {},
+    notes: []
+  };
+  lcSaveSessionToStorage();
+
+  lcRenderChecklist();
+  lcRenderNotes();
+  showView('lc-session');
+});
+
+function openMissingFieldsConfirmation(onProceed) {
+  const modal = document.getElementById('missing-fields-modal');
+  const btnYes = document.getElementById('btn-missing-fields-yes');
+  const btnNo = document.getElementById('btn-missing-fields-no');
+  
+  if (!modal || !btnYes || !btnNo) {
+    if (confirm("Missing Fields, Proceed Anyway?")) onProceed();
+    return;
+  }
+
+  modal.classList.add('active');
+  
+  const cleanUp = () => {
+    modal.classList.remove('active');
+  };
+  
+  const newYes = btnYes.cloneNode(true);
+  const newNo = btnNo.cloneNode(true);
+  btnYes.replaceWith(newYes);
+  btnNo.replaceWith(newNo);
+  
+  newYes.addEventListener('click', () => {
+    cleanUp();
+    onProceed();
+  });
+  
+  newNo.addEventListener('click', () => {
+    cleanUp();
+  });
+}
+
+function lcFinalizeAndSaveReport() {
+  if (!State.lc.session) return;
+  const auditText = lcGenerateAuditText(State.lc.session);
+  const title = `Liberty Cruise - ${State.lc.session.boat || 'Boat'} - ${State.lc.session.depart || ''}`;
+  
+  const savedReportObj = {
+    id: State.lc.session.id || Date.now().toString(),
+    timestamp: new Date().toLocaleString(),
+    depart: State.lc.session.depart,
+    ticket: State.lc.session.ticket,
+    boat: State.lc.session.boat,
+    supervisor: State.lc.session.supervisor,
+    items: State.lc.session.items || {},
+    notes: State.lc.session.notes || [],
+    auditText: auditText,
+    title: title
+  };
+
+  if (!State.lc.savedReports) State.lc.savedReports = [];
+  
+  if (State.lc.editingSavedReportIndex !== null && State.lc.editingSavedReportIndex !== undefined && State.lc.editingSavedReportIndex >= 0) {
+    State.lc.savedReports[State.lc.editingSavedReportIndex] = savedReportObj;
+    State.lc.editingSavedReportIndex = null;
+  } else {
+    State.lc.savedReports.unshift(savedReportObj);
+  }
+
+  localStorage.setItem(KEYS.LC_REPORTS, JSON.stringify(State.lc.savedReports));
+  updateStorageCount();
+
+  State.lc.session = null;
+  localStorage.removeItem(KEYS.LC_SESSION);
+  checkLcResume();
+
+  document.getElementById('report-viewer-modal').classList.remove('active');
+  lcRenderHistory();
+  showView('lc-dashboard');
+}
+
+document.getElementById('lc-btn-complete')?.addEventListener('click', () => {
+  if (!State.lc.session) return;
+  
+  const items = State.lc.session.items || {};
+  let unansweredCount = 0;
+  LC_CHECKLIST_ITEMS.forEach(item => {
+    const ans = items[item.id] ? items[item.id].answer : null;
+    if (!ans || ans === '---') unansweredCount++;
+  });
+
+  let missingExtra = false;
+  LC_CHECKLIST_ITEMS.forEach(item => {
+    if (item.extraOn && items[item.id] && items[item.id].answer === item.extraOn) {
+      if (!items[item.id].extra || !items[item.id].extra.trim()) missingExtra = true;
+    }
+  });
+
+  if (unansweredCount > 0 || missingExtra) {
+    openMissingFieldsConfirmation(() => {
+      lcFinalizeAndSaveReport();
+    });
+  } else {
+    lcFinalizeAndSaveReport();
+  }
+});
 
 console.log("Topview Logger V10.0.0 operational.");
