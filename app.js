@@ -2667,9 +2667,31 @@ function lcRenderChecklist() {
       const id = card.getAttribute('data-id');
       lcActiveDropdownId = (lcActiveDropdownId === id) ? null : id;
       lcRenderChecklist();
+      // Re-apply filter after re-render
+      const searchInput = document.getElementById('lc-checklist-search');
+      if (searchInput && searchInput.value.trim()) {
+        lcFilterChecklist(searchInput.value);
+      }
     });
   });
 }
+
+window.lcFilterChecklist = function(query) {
+  const container = document.getElementById('lc-checklist-area');
+  if (!container) return;
+  const cards = container.querySelectorAll('.lc-item-card');
+  const q = query.toLowerCase().trim();
+  cards.forEach(card => {
+    const id = card.getAttribute('data-id');
+    const item = LC_CHECKLIST_ITEMS.find(i => i.id === id);
+    if (!item) return;
+    if (!q || item.label.toLowerCase().includes(q)) {
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+};
 
 window.lcSelectOption = function(itemId, opt) {
   if (!State.lc.session) return;
@@ -2741,6 +2763,7 @@ function lcGenerateAuditText(session) {
 LIBERTY CRUISE INSPECTION REPORT
 =========================================
 Departure Time: ${session.depart || '-'}
+Return Time: ${session.returnTime || '-'}
 Ticket Number: ${session.ticket || '-'}
 Boat Name: ${session.boat || '-'}
 Supervisor That Scanned Ticket: ${session.supervisor || '-'}
@@ -2934,8 +2957,9 @@ function openMissingFieldsConfirmation(onProceed) {
   });
 }
 
-function lcFinalizeAndSaveReport() {
+function lcFinalizeAndSaveReport(returnTime) {
   if (!State.lc.session) return;
+  State.lc.session.returnTime = returnTime || '';
   const auditText = lcGenerateAuditText(State.lc.session);
   const title = `Liberty Cruise - ${State.lc.session.boat || 'Boat'} - ${State.lc.session.depart || ''}`;
   
@@ -2943,6 +2967,7 @@ function lcFinalizeAndSaveReport() {
     id: State.lc.session.id || Date.now().toString(),
     timestamp: new Date().toLocaleString(),
     depart: State.lc.session.depart,
+    returnTime: State.lc.session.returnTime,
     ticket: State.lc.session.ticket,
     boat: State.lc.session.boat,
     supervisor: State.lc.session.supervisor,
@@ -2996,10 +3021,14 @@ document.getElementById('lc-btn-complete')?.addEventListener('click', () => {
 
   if (unansweredCount > 0 || missingExtra) {
     openMissingFieldsConfirmation(() => {
-      lcFinalizeAndSaveReport();
+      openTimePicker(formatTime(), (returnTime) => {
+        lcFinalizeAndSaveReport(returnTime);
+      });
     });
   } else {
-    lcFinalizeAndSaveReport();
+    openTimePicker(formatTime(), (returnTime) => {
+      lcFinalizeAndSaveReport(returnTime);
+    });
   }
 });
 

@@ -29,6 +29,7 @@
     <symbol id="icon-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></symbol>
     <symbol id="icon-navigation" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></symbol>
     <symbol id="icon-boat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2-1a2.4 2.4 0 0 1 2-1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2-1a2.4 2.4 0 0 1 2-1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2-1"/><path d="M3 17l1.5-6h15L21 17"/><path d="M6 11V7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="10" y1="8" x2="14" y2="8"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
   </svg>
   <style>
     /* === SAMSARA BEACON OVERRIDES === */
@@ -419,7 +420,11 @@
             <div class="live-indicator-sm"><span class="dot pulse"></span><span>LIVE</span></div>
           </div>
       </div>
-      <div id="lc-checklist-area" style="margin-top: 1.5rem;">
+      <div style="margin-top: 1rem; position: relative;">
+        <svg class="icon-sm" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); opacity: 0.4; pointer-events: none;"><use href="#icon-search"/></svg>
+        <input type="text" id="lc-checklist-search" placeholder="Search violations..." style="width: 100%; padding: 10px 12px 10px 36px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: white; font-size: 0.85rem; font-weight: 600; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='rgba(255,255,255,0.12)'" oninput="lcFilterChecklist(this.value)" />
+      </div>
+      <div id="lc-checklist-area" style="margin-top: 1rem;">
         <!-- Checklist items rendered via JS -->
       </div>
       <div class="liquid-glass-container" style="margin-top: 1.5rem;">
