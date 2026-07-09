@@ -2392,23 +2392,23 @@ if (portalSessionCookie) {
 
 const LC_CHECKLIST_ITEMS = [
   { id: 'statue_duration', label: 'Duration Spent At Statue', type: 'duration' },
-  { id: 'wristbands', label: 'Gave Premium Wristbands', type: 'YN' },
+  { id: 'wristbands', label: 'Gave Premium Wristbands', type: 'YN_NA' },
   { id: 'life_jacket', label: 'Supervisor behind fence wore Life Jacket', type: 'YN', extraOn: 'No', extraLabel: 'Their Name:' },
   { id: 'took_cash', label: 'Supervisor Took Cash on the Pier', type: 'YN', extraOn: 'Yes', extraLabel: 'Time & Name:' },
   { id: 'board_step', label: 'Announced Watch Step/Head While Boarding', type: 'ASN' },
   { id: 'board_greet', label: 'Crew Greeted Upon Boarding:', type: 'ASN' },
   { id: 'deboard_thank', label: 'Crew Thanked Upon DeBoarding:', type: 'ASN' },
-  { id: 'crew_smile', label: 'Crew Smiled', type: 'ASN' },
+  { id: 'crew_smile', label: 'Crew Smiled', type: 'ASN', extraOn: ['Some', 'None'], extraLabel: 'Their Name:' },
   { id: 'cap_welcome', label: 'Welcome Message by Captain:', type: 'YN' },
   { id: 'cap_safety', label: 'Safety Message by Captain:', type: 'YN' },
   { id: 'crew_interact', label: 'Crew interacted with customers:', type: 'ASN' },
-  { id: 'uniforms', label: 'Uniforms', type: 'YN' },
-  { id: 'crew_breaks', label: 'Crew Breaks on schedule', type: 'YN' },
-  { id: 'crew_eating', label: 'Crew Eating outside of wheel house', type: 'ASN', invertColor: true },
+  { id: 'uniforms', label: 'Uniforms', type: 'YN', extraOn: 'No', extraLabel: 'Their Name:' },
+  { id: 'crew_breaks', label: 'Crew Breaks on schedule', type: 'YN', extraOn: 'No', extraLabel: 'Their Name:' },
+  { id: 'crew_eating', label: 'Crew Eating outside of wheel house', type: 'ASN', invertColor: true, extraOn: ['All', 'Some'], extraLabel: 'Their Name:' },
   { id: 'phone_usage', label: 'Phone usage outside of wheel house', type: 'ASN', invertColor: true },
   { id: 'crew_tips', label: 'Crew asking customer for tips', type: 'YN', invertColor: true },
   { id: 'vip_section', label: 'VIP Section Correct', type: 'YN' },
-  { id: 'restrooms_clean', label: 'Restrooms Clean', type: 'YN' },
+  { id: 'restrooms_clean', label: 'Restrooms Clean', type: 'YN', extraOn: 'No', extraLabel: 'Their Name:' },
   { id: 'deck_clean', label: 'Deck/Floor Cleanliness', type: 'YN' },
   { id: 'windows_clean', label: 'Windows Cleanliness', type: 'YN' },
   { id: 'temp_drinks', label: 'Temp of Drinks', type: 'TEMP' },
@@ -2464,12 +2464,13 @@ function lcCalculateDuration(startStr, endStr) {
 
 function lcIsPositiveAnswer(item, answer) {
   if (!answer || answer === '---') return false;
+  if (answer === 'Not Applicable') return 'neutral';
   if (item.type === 'duration') return true;
   if (item.invertColor) {
-    if (item.type === 'YN') return answer === 'No';
+    if (item.type === 'YN' || item.type === 'YN_NA') return answer === 'No';
     if (item.type === 'ASN') return answer === 'None';
   } else {
-    if (item.type === 'YN') return answer === 'Yes';
+    if (item.type === 'YN' || item.type === 'YN_NA') return answer === 'Yes';
     if (item.type === 'ASN') return answer === 'All';
     if (item.type === 'TEMP') return answer === 'Cold' || answer === 'Cold With Ice';
   }
@@ -2586,6 +2587,10 @@ function lcRenderChecklist() {
         badgeColor = 'rgba(46, 204, 113, 0.2)';
         badgeBorder = '#2ecc71';
         textColor = '#2ecc71';
+      } else if (isPositive === 'neutral') {
+        badgeColor = 'rgba(255, 255, 255, 0.1)';
+        badgeBorder = 'rgba(255, 255, 255, 0.4)';
+        textColor = 'rgba(255, 255, 255, 0.7)';
       } else if (isPositive) {
         badgeColor = 'rgba(46, 204, 113, 0.2)';
         badgeBorder = '#2ecc71';
@@ -2627,6 +2632,7 @@ function lcRenderChecklist() {
       } else {
         let options = [];
         if (item.type === 'YN') options = ['Yes', 'No'];
+        if (item.type === 'YN_NA') options = ['Yes', 'No', 'Not Applicable'];
         if (item.type === 'ASN') options = ['All', 'Some', 'None'];
         if (item.type === 'TEMP') options = ['Cold', 'Cold With Ice', 'Not cold'];
 
@@ -2641,7 +2647,8 @@ function lcRenderChecklist() {
       }
     }
 
-    if (item.extraOn && answer === item.extraOn) {
+    const extraOnMatch = item.extraOn && (Array.isArray(item.extraOn) ? item.extraOn.includes(answer) : answer === item.extraOn);
+    if (extraOnMatch) {
       html += `
       <div style="margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px dashed rgba(255,255,255,0.15); display: flex; flex-direction: column; gap: 4px;" onclick="event.stopPropagation();">
         <label style="font-size: 0.7rem; color: #f39c12; font-weight: 700;">${item.extraLabel}</label>
@@ -2749,7 +2756,8 @@ CHECKLIST
     const itemData = itemsMap[item.id] || {};
     const ans = itemData.answer || '---';
     let extraStr = '';
-    if (item.extraOn && ans === item.extraOn && itemData.extra) {
+    const extraMatch = item.extraOn && (Array.isArray(item.extraOn) ? item.extraOn.includes(ans) : ans === item.extraOn);
+    if (extraMatch && itemData.extra) {
       extraStr = ` ^ ${item.extraLabel} ${itemData.extra}`;
     }
     text += `${item.label} || ${ans}${extraStr}\n`;
@@ -2977,8 +2985,12 @@ document.getElementById('lc-btn-complete')?.addEventListener('click', () => {
 
   let missingExtra = false;
   LC_CHECKLIST_ITEMS.forEach(item => {
-    if (item.extraOn && items[item.id] && items[item.id].answer === item.extraOn) {
-      if (!items[item.id].extra || !items[item.id].extra.trim()) missingExtra = true;
+    if (item.extraOn && items[item.id] && items[item.id].answer) {
+      const ans = items[item.id].answer;
+      const matches = Array.isArray(item.extraOn) ? item.extraOn.includes(ans) : ans === item.extraOn;
+      if (matches && (!items[item.id].extra || !items[item.id].extra.trim())) {
+        missingExtra = true;
+      }
     }
   });
 
