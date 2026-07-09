@@ -49,11 +49,8 @@ class SamsaraEngine {
   }
   
   static get PROXY_BASE() {
-    const isLocalDevServer = typeof window !== 'undefined' && 
-      !window.Capacitor && 
-      window.location.protocol !== 'capacitor:' && 
-      (window.location.port === '5173' || window.location.port === '3000' || window.location.hostname === 'localhost');
-    return isLocalDevServer ? 'http://localhost:3001' : 'https://topviewloggerr.onrender.com';
+    // Always route to live Render proxy (matching COUNTIF_PROXY_URL) unless local testing is explicitly enabled
+    return (typeof window !== 'undefined' && window.USE_LOCAL_PROXY) ? 'http://localhost:3001' : 'https://topviewloggerr.onrender.com';
   }
 
   static async proxyRequest(endpoint, body = {}) {
