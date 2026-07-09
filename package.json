@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server/countif-proxy.js",
+    "postinstall": "cd server && npm install --no-save || true"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
@@ -16,6 +18,12 @@
   "dependencies": {
     "@capacitor/core": "^8.2.0",
     "@capacitor/ios": "^8.2.0",
-    "playwright": "^1.59.1"
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "playwright": "^1.59.1",
+    "puppeteer": "^24.4.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }

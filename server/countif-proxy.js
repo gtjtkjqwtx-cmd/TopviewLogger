@@ -610,7 +610,7 @@ app.post('/api/samsara/fleet', async (req, res) => {
 
 // ── Health Check ──
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'online', service: 'countif-proxy', version: '10.0.0' });
+  res.json({ status: 'online', service: 'countif-proxy', version: '10.1.0-samsara' });
 });
 
 // ── Utility: Extract hidden field value from HTML ──
