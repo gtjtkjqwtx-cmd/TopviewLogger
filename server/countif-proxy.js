@@ -11,6 +11,15 @@
 
 import express from 'express';
 import cors from 'cors';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+puppeteer.use(StealthPlugin());
+
+let samsaraSessionCookies = null;
+let samsaraCsrfToken = null;
+let samsaraPendingPage = null;
+let samsaraPendingBrowser = null;
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -317,6 +326,285 @@ app.get('/api/samsara/proxy', async (req, res) => {
   } catch (err) {
     console.error('[SamsaraTunnel] Proxy Crash:', err);
     return res.status(502).json({ success: false, message: 'Tunnel failed to reach Samsara: ' + err.message });
+  }
+});
+
+// ============================================================
+// SAMSARA SPA WORKAROUND ENDPOINTS (PUPPETEER + GRAPHQL)
+// ============================================================
+
+app.get('/api/samsara/status', (req, res) => {
+  res.json({
+    connected: Boolean(samsaraSessionCookies && samsaraCsrfToken),
+    hasPending2FA: Boolean(samsaraPendingPage)
+  });
+});
+
+app.post('/api/samsara/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ success: false, message: 'Username and password are required.' });
+  }
+
+  try {
+    if (samsaraPendingBrowser) {
+      try { await samsaraPendingBrowser.close(); } catch (e) {}
+      samsaraPendingBrowser = null;
+      samsaraPendingPage = null;
+    }
+
+    const launchOptions = {
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    };
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+
+    console.log('[SamsaraLogin] Launching Puppeteer browser...');
+    const browser = await puppeteer.launch(launchOptions);
+    const page = await browser.newPage();
+
+    // Watch all requests to capture X-Csrf-Token
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      const headers = request.headers();
+      if (headers['x-csrf-token'] || headers['X-Csrf-Token']) {
+        samsaraCsrfToken = headers['x-csrf-token'] || headers['X-Csrf-Token'];
+        console.log('[SamsaraLogin] Intercepted X-Csrf-Token:', samsaraCsrfToken);
+      }
+      request.continue();
+    });
+
+    await page.goto('https://cloud.samsara.com/signin', { waitUntil: 'networkidle2', timeout: 45000 });
+
+    // Type Email / Username
+    await page.waitForSelector('input[type="email"], input[name*="email" i], input[placeholder*="email" i]', { timeout: 20000 });
+    await page.type('input[type="email"], input[name*="email" i], input[placeholder*="email" i]', username, { delay: 35 });
+
+    // Try clicking Next if two-step form
+    const nextBtn = await page.$('button[type="submit"], button:has-text("Next")');
+    if (nextBtn) {
+      await nextBtn.click();
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // Type Password
+    await page.waitForSelector('input[type="password"]', { timeout: 20000 });
+    await page.type('input[type="password"]', password, { delay: 35 });
+
+    // Click Sign In
+    const signInBtns = await page.$$('button');
+    let clickedSignIn = false;
+    for (const btn of signInBtns) {
+      const txt = await page.evaluate(el => el.textContent || '', btn);
+      if (/sign in|log in|submit|continue/i.test(txt)) {
+        await btn.click();
+        clickedSignIn = true;
+        break;
+      }
+    }
+    if (!clickedSignIn && signInBtns[0]) await signInBtns[0].click();
+
+    console.log('[SamsaraLogin] Credentials submitted, waiting for navigation or 2FA...');
+    await new Promise(r => setTimeout(r, 6000));
+
+    const pageContent = await page.content();
+    const currentUrl = page.url();
+
+    // Check for 2FA / Verification Email
+    if (/send me an email|verification email|enter code|verify/i.test(pageContent) || /verify|mfa|challenge/i.test(currentUrl)) {
+      console.log('[SamsaraLogin] 2FA Verification page detected.');
+
+      // Click "Send me an email" if present
+      const buttons = await page.$$('button');
+      for (const btn of buttons) {
+        const txt = await page.evaluate(el => el.textContent || '', btn);
+        if (/send me an email/i.test(txt)) {
+          console.log('[SamsaraLogin] Clicking "Send me an email" button...');
+          await btn.click();
+          await new Promise(r => setTimeout(r, 3000));
+          break;
+        }
+      }
+
+      samsaraPendingBrowser = browser;
+      samsaraPendingPage = page;
+      return res.json({ success: false, needs2FA: true, message: 'Verification code sent to your email.' });
+    }
+
+    // If Dashboard loaded or CSRF captured
+    if (/fleet|list|bounds|\/o\//i.test(currentUrl) || samsaraCsrfToken) {
+      const cookiesArr = await page.cookies();
+      samsaraSessionCookies = cookiesArr.map(c => `${c.name}=${c.value}`).join('; ');
+      console.log('[SamsaraLogin] Login successful! Extracted cookies.');
+      await browser.close();
+      return res.json({ success: true, message: 'Connected to Samsara', cookies: samsaraSessionCookies, csrfToken: samsaraCsrfToken });
+    }
+
+    // Otherwise check error
+    const errorTextMatch = pageContent.match(/invalid email or password|incorrect password|could not sign you in/i);
+    await browser.close();
+    if (errorTextMatch) {
+      return res.status(401).json({ success: false, message: 'Invalid username or password.' });
+    }
+    return res.status(401).json({ success: false, message: 'Login failed or timed out during sign-in.' });
+
+  } catch (err) {
+    console.error('[SamsaraLogin] Error:', err);
+    if (samsaraPendingBrowser) {
+      try { await samsaraPendingBrowser.close(); } catch (e) {}
+      samsaraPendingBrowser = null;
+      samsaraPendingPage = null;
+    }
+    return res.status(500).json({ success: false, message: 'Server error during login: ' + err.message });
+  }
+});
+
+app.post('/api/samsara/verify', async (req, res) => {
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ success: false, message: 'Verification code required.' });
+  if (!samsaraPendingPage || !samsaraPendingBrowser) {
+    return res.status(400).json({ success: false, message: 'No pending login session found. Please login again.' });
+  }
+
+  try {
+    console.log('[SamsaraVerify] Typing verification code...');
+    await samsaraPendingPage.waitForSelector('input[type="text"], input[type="number"], input[placeholder*="code" i], input', { timeout: 15000 });
+    const inputs = await samsaraPendingPage.$$('input');
+    if (inputs.length > 0) {
+      await inputs[0].type(code, { delay: 40 });
+    }
+
+    // Click Submit/Verify button or press Enter
+    const buttons = await samsaraPendingPage.$$('button');
+    let clicked = false;
+    for (const btn of buttons) {
+      const txt = await samsaraPendingPage.evaluate(el => el.textContent || '', btn);
+      if (/verify|submit|confirm|continue/i.test(txt)) {
+        await btn.click();
+        clicked = true;
+        break;
+      }
+    }
+    if (!clicked) await samsaraPendingPage.keyboard.press('Enter');
+
+    console.log('[SamsaraVerify] Waiting for dashboard redirect...');
+    await new Promise(r => setTimeout(r, 7000));
+
+    const cookiesArr = await samsaraPendingPage.cookies();
+    samsaraSessionCookies = cookiesArr.map(c => `${c.name}=${c.value}`).join('; ');
+    
+    await samsaraPendingBrowser.close();
+    samsaraPendingBrowser = null;
+    samsaraPendingPage = null;
+
+    if (!samsaraSessionCookies) {
+      return res.status(401).json({ success: false, message: 'Verification failed to acquire cookies.' });
+    }
+
+    return res.json({ success: true, message: 'Verified and connected to Samsara', cookies: samsaraSessionCookies, csrfToken: samsaraCsrfToken });
+  } catch (err) {
+    console.error('[SamsaraVerify] Error:', err);
+    if (samsaraPendingBrowser) {
+      try { await samsaraPendingBrowser.close(); } catch (e) {}
+      samsaraPendingBrowser = null;
+      samsaraPendingPage = null;
+    }
+    return res.status(500).json({ success: false, message: 'Verification error: ' + err.message });
+  }
+});
+
+app.post('/api/samsara/fleet', async (req, res) => {
+  const cookies = req.body.cookies || samsaraSessionCookies;
+  const csrf = req.body.csrfToken || samsaraCsrfToken;
+  const filterText = req.body.filterText || '';
+
+  if (!cookies || !csrf) {
+    return res.status(401).json({ success: false, message: 'Not connected to Samsara. Please login first.' });
+  }
+
+  const query = `
+    fragment MapAsset on Asset {
+      uuid
+      name
+      lastLocation {
+        lat
+        lng
+      }
+      status
+      isRunning
+      addressEntry {
+        name
+        types
+      }
+    }
+
+    query FleetListPage($orgId: int64!, $first: Int, $filterText: String, $assetTypes: [String!], $sortBy: String, $sortOrder: String, $isActivated: Boolean) {
+      assets(orgId: $orgId, first: $first, filterText: $filterText, assetTypes: $assetTypes, sortBy: $sortBy, sortOrder: $sortOrder, isActivated: $isActivated) {
+        nodes {
+          ...MapAsset
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    orgId: 6003359,
+    assetTypes: ["Vehicle"],
+    first: 500,
+    filterText: filterText,
+    sortBy: "inMotion",
+    sortOrder: "desc",
+    isActivated: true
+  };
+
+  try {
+    const graphRes = await fetch('https://us6-ws.cloud.samsara.com/r/graphql?q=FleetListPage', {
+      method: 'POST',
+      headers: {
+        'Cookie': cookies,
+        'X-Csrf-Token': csrf,
+        'Content-Type': 'application/json',
+        'Origin': 'https://cloud.samsara.com',
+        'Referer': 'https://cloud.samsara.com/o/6003359/fleet/list',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0'
+      },
+      body: JSON.stringify({ query, variables })
+    });
+
+    if (!graphRes.ok) {
+      if (graphRes.status === 401 || graphRes.status === 403) {
+        samsaraSessionCookies = null;
+        samsaraCsrfToken = null;
+        return res.status(401).json({ success: false, message: 'Session expired. Please login again.' });
+      }
+      throw new Error(`Samsara GraphQL HTTP ${graphRes.status}`);
+    }
+
+    const json = await graphRes.json();
+    if (json.errors && json.errors.length > 0) {
+      console.warn('[SamsaraFleet] GraphQL Errors:', json.errors);
+    }
+
+    const nodes = json.data?.assets?.nodes || [];
+    const vehicles = nodes.map(v => ({
+      id: v.uuid || v.name,
+      name: v.name || 'Unknown',
+      latitude: v.lastLocation?.lat || 0,
+      longitude: v.lastLocation?.lng || 0,
+      heading: 0,
+      speed: v.isRunning ? 15 : 0,
+      isRunning: Boolean(v.isRunning),
+      status: v.status || 'unknown',
+      address: v.addressEntry?.name || 'Unknown Address',
+      time: new Date().toISOString()
+    }));
+
+    return res.json({ success: true, vehicles, count: vehicles.length });
+  } catch (err) {
+    console.error('[SamsaraFleet] Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch fleet data: ' + err.message });
   }
 });
 

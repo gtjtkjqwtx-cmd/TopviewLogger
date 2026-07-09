@@ -48,82 +48,66 @@ class SamsaraEngine {
     return SAMSARA_CONFIG;
   }
   
+  static get PROXY_BASE() {
+    const isDev = (typeof window !== 'undefined' && (window.location.port === '5173' || window.location.port === '3000' || window.location.hostname === 'localhost'));
+    return isDev ? 'http://localhost:3001' : 'https://topviewloggerr.onrender.com';
+  }
+
+  static async proxyRequest(endpoint, body = {}) {
+    const cookies = typeof localStorage !== 'undefined' ? localStorage.getItem('samsara_session_cookies') : null;
+    const csrfToken = typeof localStorage !== 'undefined' ? localStorage.getItem('samsara_csrf_token') : null;
+    const payload = { ...body };
+    if (cookies && !payload.cookies) payload.cookies = cookies;
+    if (csrfToken && !payload.csrfToken) payload.csrfToken = csrfToken;
+
+    const url = `${this.PROXY_BASE}${endpoint}`;
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url, true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); } catch(e) { resolve({ success: true }); }
+        } else {
+          try {
+            const errJson = JSON.parse(xhr.responseText);
+            reject(new Error(errJson.message || `HTTP ${xhr.status}`));
+          } catch(e) {
+            reject(new Error(`HTTP ${xhr.status}`));
+          }
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network/CORS block reaching proxy'));
+      xhr.timeout = 35000;
+      xhr.ontimeout = () => reject(new Error('Proxy connection timed out'));
+      xhr.send(JSON.stringify(payload));
+    });
+  }
+
   /**
-   * Fetches the raw GPS state of a specific vehicle from the Samsara platform.
+   * Fetches the raw GPS state of a specific vehicle from the Samsara platform via Proxy.
    * @param {string} vehicleId - The specific Samsara ID of the bus
-   * @param {string} accessToken - The Samsara API Token
    * @returns {Promise<{latitude: number, longitude: number, heading: number, speed: number}>}
    */
-  static async fetchBusLocation(vehicleId, accessToken) {
-    // Stage 1: Resolve name to ID
-    const timestamp = Date.now();
-    const baseUrl = (window.location.port === '5173' || window.location.port === '3000') 
-      ? '/samsara-api' : 'https://api.samsara.com';
-    let listUrl = `${baseUrl}/fleet/vehicles?_cb=${timestamp}`;
-    // Native CapacitorHttp handles CORS on iOS.
-
+  static async fetchBusLocation(vehicleId) {
     try {
-      const listRes = await fetch(listUrl, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
-      });
-
-      if (!listRes.ok) throw new Error(listRes.status === 401 ? 'Invalid API Token' : `Discovery Error: ${listRes.status}`);
-
-      const listData = await listRes.json();
-      const vehicles = listData.data || [];
-      console.log(`[Samsara] Fleet Discovery: Found ${vehicles.length} assets.`);
-
-      const searchId = vehicleId.trim().toLowerCase();
-      
-      // Filter for all potential matches (Name, ID, or VIN)
-      const possibleVehicles = vehicles.filter(v => {
-        const name = (v.name || '').trim().toLowerCase();
-        const id = (v.id || '').trim().toLowerCase();
-        const vin = (v.vin || '').trim().toLowerCase();
-        return name === searchId || id === searchId || vin === searchId;
-      });
-
-      if (possibleVehicles.length === 0) {
-        console.warn(`[Samsara] No match for "${searchId}" in registry.`);
-        throw new Error('Invalid Bus ID');
+      const res = await this.proxyRequest('/api/samsara/fleet', { filterText: vehicleId });
+      if (!res.success || !res.vehicles || res.vehicles.length === 0) {
+        throw new Error('Bus not found or offline');
       }
-
-      // SELECT THE MOST RECENT: Sort by updatedAtTime to ensure we get the live asset, not a decommissioned clone
-      possibleVehicles.sort((a, b) => new Date(b.updatedAtTime || 0) - new Date(a.updatedAtTime || 0));
-      const vehicleEntry = possibleVehicles[0];
-      
-      console.log(`[Samsara] Resolved "${searchId}" to ${vehicleEntry.name} (ID: ${vehicleEntry.id}) - Updated: ${vehicleEntry.updatedAtTime}`);
-
-      // Stage 2: Fetch HIGH-PRECISION location for ID
-      const cacheBust = `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
-      let locUrl = `${baseUrl}/fleet/vehicles/locations?vehicleIds=${vehicleEntry.id}&_cb=${cacheBust}`;
-      // Native CapacitorHttp handles CORS on iOS.
-
-      const locRes = await fetch(locUrl, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
-      });
-
-      if (!locRes.ok) throw new Error(`Latency Error: ${locRes.status}`);
-
-      const locData = await locRes.json();
-      const vehicle = (locData.data || [])[0];
-      
-      if (!vehicle || !vehicle.location) throw new Error('No Satellite Contact');
-
-      const locBlock = vehicle.location;
+      const searchId = (vehicleId || '').trim().toLowerCase();
+      const match = res.vehicles.find(v => (v.name || '').trim().toLowerCase() === searchId) || res.vehicles[0];
       
       return {
-        latitude: locBlock.latitude,
-        longitude: locBlock.longitude,
-        heading: locBlock.heading || 0,
-        speed: (locBlock.speed !== undefined) ? locBlock.speed : 0,
-        time: locBlock.time,
-        address: locBlock.reverseGeo ? locBlock.reverseGeo.formattedLocation : "Unknown Street"
+        latitude: match.latitude,
+        longitude: match.longitude,
+        heading: match.heading || 0,
+        speed: match.speed || 0,
+        time: match.time || new Date().toISOString(),
+        address: match.address || 'Unknown Street'
       };
     } catch (e) {
-      console.error('[SamsaraEngine] Connection failed:', e);
+      console.error('[SamsaraEngine] fetchBusLocation failed:', e);
       throw e;
     }
   }
@@ -229,75 +213,41 @@ class SamsaraEngine {
   }
 
   /**
-   * Fetches the closest active buses to a given coordinate.
+   * Fetches the closest active buses to a given coordinate via Proxy.
    * @param {number} lat - Latitude of the stop
    * @param {number} lng - Longitude of the stop
-   * @param {string} accessToken - Samsara API Token
-   * @param {number} limit - Number of closest buses to return (default: 2)
+   * @param {number} limit - Number of closest buses to return (default: 3)
    */
-  static async findBusesNearStop(lat, lng, accessToken, limit = 3) {
-    const timestamp = Date.now();
-    const baseUrl = (window.location.port === '5173' || window.location.port === '3000') 
-      ? '/samsara-api' : 'https://api.samsara.com';
-    let listUrl = `${baseUrl}/fleet/vehicles?_cb=${timestamp}`;
-    let locUrl = `${baseUrl}/fleet/vehicles/locations?_cb=${timestamp}`;
-    
-    // Native CapacitorHttp handles CORS on iOS.
-
+  static async findBusesNearStop(lat, lng, limit = 3) {
     try {
-      // 1. Fetch Fleet Roster to get Names mapping
-      const listRes = await fetch(listUrl, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
-      });
-      if (!listRes.ok) throw new Error('Fleet Discovery Error');
-      const listData = await listRes.json();
-      const vehicles = listData.data || [];
+      const res = await this.proxyRequest('/api/samsara/fleet', { filterText: '' });
+      if (!res.success || !res.vehicles) {
+        throw new Error('Failed to load fleet locations');
+      }
       
-      const nameMap = {};
-      vehicles.forEach(v => {
-        nameMap[v.id] = v.name || 'Unknown Bus';
-      });
-
-      // 2. Fetch all locations
-      const locRes = await fetch(locUrl, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
-      });
-      if (!locRes.ok) throw new Error('Location API Error');
-      const locData = await locRes.json();
-      const activeLocations = locData.data || [];
-
-      // 3. Calculate distance to Stop for each vehicle
+      const activeLocations = res.vehicles;
       let busesWithDistance = [];
       activeLocations.forEach(v => {
-        if (!v.location) return;
-        const busName = nameMap[v.id] || v.name || v.id;
-        const distance = this.getDistanceMeters(lat, lng, v.location.latitude, v.location.longitude);
+        if (!v.latitude || !v.longitude) return;
+        const distance = this.getDistanceMeters(lat, lng, v.latitude, v.longitude);
         
-        // Filter out stale coordinates (older than 10 minutes)
-        const diffMins = Math.floor(Math.abs(Date.now() - new Date(v.location.time).getTime()) / 60000);
-        if (diffMins > 10) return; // Skip severely stale buses
-
         busesWithDistance.push({
-          id: v.id,
-          name: busName,
-          latitude: v.location.latitude,
-          longitude: v.location.longitude,
-          heading: v.location.heading || 0,
-          speed: v.location.speed || 0,
-          time: v.location.time,
-          address: v.location.reverseGeo ? v.location.reverseGeo.formattedLocation : "Unknown Location",
+          id: v.id || v.name,
+          name: v.name || 'Unknown Bus',
+          latitude: v.latitude,
+          longitude: v.longitude,
+          heading: v.heading || 0,
+          speed: v.speed || 0,
+          time: v.time || new Date().toISOString(),
+          address: v.address || 'Unknown Location',
           distanceToStop: distance
         });
       });
 
       busesWithDistance.sort((a, b) => a.distanceToStop - b.distanceToStop);
-      
       return busesWithDistance.slice(0, limit);
-      
-    } catch(e) {
-      console.error('[SamsaraEngine] Error in findBusesNearStop:', e);
+    } catch (e) {
+      console.error('[SamsaraEngine] findBusesNearStop failed:', e);
       throw e;
     }
   }

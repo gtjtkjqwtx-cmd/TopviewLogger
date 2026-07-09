@@ -386,9 +386,6 @@ async function runFleetScan() {
   const btn = document.getElementById('btn-show-all-buses');
   if (!btn) return;
   const orgText = btn.innerHTML;
-  const apiKey = DEFAULTS.SAMSARA_API;
-  
-  if (!apiKey) return;
   const statusBadge = document.getElementById('tracker-api-status');
   
   btn.innerHTML = '<span>Scanning Fleet...</span>';
@@ -402,7 +399,7 @@ async function runFleetScan() {
   try {
      document.getElementById('tracker-results-container').style.display = 'block';
      // Pull all buses globally using large limit fallback
-     const rawBuses = await SamsaraEngine.findBusesNearStop(0, 0, apiKey, 500);
+     const rawBuses = await SamsaraEngine.findBusesNearStop(0, 0, 500);
      
      // ENRICHMENT: Link every bus with driver data from portalData
      const closestBuses = rawBuses.map(bus => {
@@ -460,6 +457,9 @@ async function runFleetScan() {
      statusBadge.style.color = '#e74c3c';
      statusBadge.innerHTML = `<div class="status-dot" style="background:#e74c3c;"></div><span>${e.message}</span>`;
      btn.innerHTML = orgText;
+     if (/login|not connected|session expired|401/i.test(e.message)) {
+       openSamsaraConnectionModal();
+     }
   }
 }
 
@@ -526,6 +526,124 @@ document.getElementById('btn-mini-dispatch').addEventListener('click', () => {
 });
 
 const COUNTIF_PROXY_URL = 'https://topviewloggerr.onrender.com';
+
+function openSamsaraConnectionModal() {
+  const modal = document.getElementById('samsara-connection-modal');
+  if (modal) modal.classList.add('active');
+  const errEl = document.getElementById('samsara-login-error');
+  if (errEl) errEl.style.display = 'none';
+}
+
+function closeSamsaraConnectionModal() {
+  const modal = document.getElementById('samsara-connection-modal');
+  if (modal) modal.classList.remove('active');
+}
+
+function openSamsara2FAModal() {
+  closeSamsaraConnectionModal();
+  const modal = document.getElementById('samsara-2fa-modal');
+  if (modal) modal.classList.add('active');
+  const errEl = document.getElementById('samsara-2fa-error');
+  if (errEl) errEl.style.display = 'none';
+  const input = document.getElementById('samsara-2fa-code');
+  if (input) input.value = '';
+}
+
+function closeSamsara2FAModal() {
+  const modal = document.getElementById('samsara-2fa-modal');
+  if (modal) modal.classList.remove('active');
+}
+
+setTimeout(() => {
+  const btnCloseLogin = document.getElementById('btn-close-samsara-modal');
+  const btnCancelLogin = document.getElementById('btn-cancel-samsara-login');
+  const btnSubmitLogin = document.getElementById('btn-submit-samsara-login');
+  const btnClose2fa = document.getElementById('btn-close-samsara-2fa');
+  const btnCancel2fa = document.getElementById('btn-cancel-samsara-2fa');
+  const btnSubmit2fa = document.getElementById('btn-submit-samsara-2fa');
+
+  if (btnCloseLogin) btnCloseLogin.addEventListener('click', closeSamsaraConnectionModal);
+  if (btnCancelLogin) btnCancelLogin.addEventListener('click', closeSamsaraConnectionModal);
+  if (btnClose2fa) btnClose2fa.addEventListener('click', closeSamsara2FAModal);
+  if (btnCancel2fa) btnCancel2fa.addEventListener('click', closeSamsara2FAModal);
+
+  if (btnSubmitLogin) {
+    btnSubmitLogin.addEventListener('click', async () => {
+      const email = document.getElementById('samsara-login-email')?.value.trim();
+      const password = document.getElementById('samsara-login-password')?.value;
+      const errEl = document.getElementById('samsara-login-error');
+      if (!email || !password) {
+        if (errEl) { errEl.textContent = 'Please enter both email and password'; errEl.style.display = 'block'; }
+        return;
+      }
+      const orgText = btnSubmitLogin.innerHTML;
+      btnSubmitLogin.innerHTML = 'Connecting...';
+      btnSubmitLogin.disabled = true;
+      if (errEl) errEl.style.display = 'none';
+
+      try {
+        const res = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/login`, 'POST', { username: email, password });
+        if (res.needs2FA) {
+          openSamsara2FAModal();
+        } else if (res.success) {
+          if (res.cookies) localStorage.setItem('samsara_session_cookies', res.cookies);
+          if (res.csrfToken) localStorage.setItem('samsara_csrf_token', res.csrfToken);
+          closeSamsaraConnectionModal();
+          const statusBadge = document.getElementById('tracker-api-status');
+          if (statusBadge) {
+            statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+            statusBadge.style.color = '#2ecc71';
+            statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
+          }
+        } else {
+          if (errEl) { errEl.textContent = res.message || 'Login failed'; errEl.style.display = 'block'; }
+        }
+      } catch (e) {
+        if (errEl) { errEl.textContent = e.data?.message || e.message || 'Network error connecting to proxy'; errEl.style.display = 'block'; }
+      } finally {
+        btnSubmitLogin.innerHTML = orgText;
+        btnSubmitLogin.disabled = false;
+      }
+    });
+  }
+
+  if (btnSubmit2fa) {
+    btnSubmit2fa.addEventListener('click', async () => {
+      const code = document.getElementById('samsara-2fa-code')?.value.trim();
+      const errEl = document.getElementById('samsara-2fa-error');
+      if (!code) {
+        if (errEl) { errEl.textContent = 'Please enter the verification code'; errEl.style.display = 'block'; }
+        return;
+      }
+      const orgText = btnSubmit2fa.innerHTML;
+      btnSubmit2fa.innerHTML = 'Verifying...';
+      btnSubmit2fa.disabled = true;
+      if (errEl) errEl.style.display = 'none';
+
+      try {
+        const res = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/verify`, 'POST', { code });
+        if (res.success) {
+          if (res.cookies) localStorage.setItem('samsara_session_cookies', res.cookies);
+          if (res.csrfToken) localStorage.setItem('samsara_csrf_token', res.csrfToken);
+          closeSamsara2FAModal();
+          const statusBadge = document.getElementById('tracker-api-status');
+          if (statusBadge) {
+            statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+            statusBadge.style.color = '#2ecc71';
+            statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
+          }
+        } else {
+          if (errEl) { errEl.textContent = res.message || 'Verification failed'; errEl.style.display = 'block'; }
+        }
+      } catch (e) {
+        if (errEl) { errEl.textContent = e.data?.message || e.message || 'Network error verifying code'; errEl.style.display = 'block'; }
+      } finally {
+        btnSubmit2fa.innerHTML = orgText;
+        btnSubmit2fa.disabled = false;
+      }
+    });
+  }
+}, 100);
 
 /**
  * Robust XHR helper to bypass fetch-only security blocks on mobile
@@ -968,12 +1086,10 @@ async function loadRouteStops() {
 }
 
 document.getElementById('btn-run-tracker').addEventListener('click', async () => {
-  const apiKey = DEFAULTS.SAMSARA_API;
   const busId = document.getElementById('tracker-bus-number').value.trim();
   const stopIdString = document.getElementById('tracker-route-input').value.trim();
   const stopId = parseInt(stopIdString, 10);
   
-  if (!apiKey) { alert('Samsara API configuration missing.'); return; }
   if (!busId && !stopIdString) { alert('Please enter a Bus Number or Stop Number'); return; }
   
   const btn = document.getElementById('btn-run-tracker');
@@ -1000,7 +1116,7 @@ document.getElementById('btn-run-tracker').addEventListener('click', async () =>
 
      if (busId) {
        // --- BUS TRACKING BRANCH ---
-       const busGps = await SamsaraEngine.fetchBusLocation(busId, apiKey);
+       const busGps = await SamsaraEngine.fetchBusLocation(busId);
        
        // ENRICHMENT: Link with CountIf data
        let enriched = DispatchEngine.getEnrichedStatus(busGps, busId, portalData);
@@ -1074,7 +1190,7 @@ document.getElementById('btn-run-tracker').addEventListener('click', async () =>
          iconAnchor: [20, 36] 
        });
 
-       const marker = L.marker(pos, { icon: customIcon }).addTo(trackerMap);
+          const marker = L.marker(pos, { icon: customIcon }).addTo(trackerMap);
        trackerMarkers.push(marker);
 
        trackerMap.setView(pos, 16, { animate: true });
@@ -1084,7 +1200,7 @@ document.getElementById('btn-run-tracker').addEventListener('click', async () =>
        const stopObj = SamsaraEngine.CONFIG.STOPS.find(s => s.id === stopId);
        if (!stopObj) throw new Error("Invalid Stop #");
 
-       const closestBuses = await SamsaraEngine.findBusesNearStop(stopObj.lat, stopObj.lng, apiKey, 5);
+       const closestBuses = await SamsaraEngine.findBusesNearStop(stopObj.lat, stopObj.lng, 5);
        
        statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
        statusBadge.style.color = '#2ecc71';
@@ -1146,6 +1262,9 @@ document.getElementById('btn-run-tracker').addEventListener('click', async () =>
      statusBadge.style.color = '#e74c3c';
      statusBadge.innerHTML = `<div class="status-dot" style="background:#e74c3c;"></div><span>${e.message}</span>`;
      btn.innerHTML = orgText;
+     if (/login|not connected|session expired|401/i.test(e.message)) {
+       openSamsaraConnectionModal();
+     }
   }
 });
 
