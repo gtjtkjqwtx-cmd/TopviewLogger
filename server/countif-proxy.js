@@ -13,6 +13,7 @@ import express from 'express';
 import cors from 'cors';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import chromium from '@sparticuz/chromium';
 
 puppeteer.use(StealthPlugin());
 
@@ -353,15 +354,26 @@ app.post('/api/samsara/login', async (req, res) => {
       samsaraPendingPage = null;
     }
 
-    const launchOptions = {
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-    };
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-      launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    const isProduction = Boolean(process.env.NODE_ENV === 'production' || process.env.RENDER || process.env.PORT);
+    let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    if (!executablePath && isProduction) {
+      try {
+        console.log('[SamsaraLogin] Resolving @sparticuz/chromium standalone path...');
+        executablePath = await chromium.executablePath();
+        console.log('[SamsaraLogin] Resolved standalone path:', executablePath);
+      } catch (err) {
+        console.warn('[SamsaraLogin] Could not get sparticuz chromium path:', err.message);
+      }
     }
 
-    console.log('[SamsaraLogin] Launching Puppeteer browser...');
+    const launchOptions = {
+      headless: isProduction ? chromium.headless : 'new',
+      args: isProduction ? [...chromium.args, '--disable-gpu', '--no-sandbox'] : ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+      defaultViewport: chromium.defaultViewport || { width: 1280, height: 720 },
+      executablePath: executablePath || undefined
+    };
+
+    console.log('[SamsaraLogin] Launching Puppeteer browser with options:', JSON.stringify({ ...launchOptions, args: launchOptions.args.length }));
     const browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
 
@@ -610,7 +622,7 @@ app.post('/api/samsara/fleet', async (req, res) => {
 
 // ── Health Check ──
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'online', service: 'countif-proxy', version: '10.1.0-samsara' });
+  res.json({ status: 'online', service: 'countif-proxy', version: '10.1.1-chromium' });
 });
 
 // ── Utility: Extract hidden field value from HTML ──
