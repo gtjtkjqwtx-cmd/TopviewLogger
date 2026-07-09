@@ -1281,10 +1281,10 @@ function openReportViewer(content, title, onUpdateCallback) {
 
   const formBtn = document.getElementById('dynamic-form-btn');
   if (formBtn) {
-    if ((title && title.includes('Stopwatch')) || content.includes('STOPWATCH')) {
+    if (content.includes('Stop #:') || (title && title.includes('Stop #'))) {
       formBtn.textContent = 'Stopwatch Form';
       formBtn.dataset.url = 'https://docs.google.com/forms/d/e/1FAIpQLSdlcMExtKCdKrDjad4B4Rq1y4phVHG5nSJhY_seBxKgbQBSYw/viewform';
-    } else if ((title && title.includes('Bus ')) || content.includes('FULL LOOP')) {
+    } else if (content.includes('Bus Number:') || (title && title.includes('Bus '))) {
       formBtn.textContent = 'Full Loop Form';
       formBtn.dataset.url = 'https://docs.google.com/forms/d/e/1FAIpQLSfc97vaKGcC6Ijdjer5fyQ2M3qN93scHiBGDRWtD_gYhU1ROw/viewform';
     } else {
