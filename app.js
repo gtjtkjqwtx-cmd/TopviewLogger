@@ -663,7 +663,7 @@ function xhrProxyRequest(url, method, body = null) {
       }
     };
     xhr.onerror = () => reject(new Error('Network/CORS block'));
-    xhr.timeout = 30000;
+    xhr.timeout = 65000;
     xhr.ontimeout = () => reject(new Error('Connection timed out (Waking up server?)'));
     xhr.send(body ? JSON.stringify(body) : null);
   });

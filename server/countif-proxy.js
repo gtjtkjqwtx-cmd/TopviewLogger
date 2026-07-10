@@ -388,7 +388,7 @@ app.post('/api/samsara/login', async (req, res) => {
       request.continue();
     });
 
-    await page.goto('https://cloud.samsara.com/signin', { waitUntil: 'networkidle2', timeout: 45000 });
+    await page.goto('https://cloud.samsara.com/signin', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Type Email / Username
     await page.waitForSelector('input[type="email"], input[name*="email" i], input[placeholder*="email" i]', { timeout: 20000 });
