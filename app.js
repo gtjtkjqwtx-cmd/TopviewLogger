@@ -539,55 +539,85 @@ function closeSamsaraConnectionModal() {
   if (modal) modal.classList.remove('active');
 }
 
-function openSamsara2FAModal() {
-  closeSamsaraConnectionModal();
-  const modal = document.getElementById('samsara-2fa-modal');
-  if (modal) modal.classList.add('active');
-  const errEl = document.getElementById('samsara-2fa-error');
-  if (errEl) errEl.style.display = 'none';
-  const input = document.getElementById('samsara-2fa-code');
-  if (input) input.value = '';
-}
 
-function closeSamsara2FAModal() {
-  const modal = document.getElementById('samsara-2fa-modal');
-  if (modal) modal.classList.remove('active');
-}
 
 setTimeout(() => {
   const btnCloseLogin = document.getElementById('btn-close-samsara-modal');
   const btnCancelLogin = document.getElementById('btn-cancel-samsara-login');
   const btnSubmitLogin = document.getElementById('btn-submit-samsara-login');
-  const btnClose2fa = document.getElementById('btn-close-samsara-2fa');
-  const btnCancel2fa = document.getElementById('btn-cancel-samsara-2fa');
-  const btnSubmit2fa = document.getElementById('btn-submit-samsara-2fa');
 
   if (btnCloseLogin) btnCloseLogin.addEventListener('click', closeSamsaraConnectionModal);
   if (btnCancelLogin) btnCancelLogin.addEventListener('click', closeSamsaraConnectionModal);
-  if (btnClose2fa) btnClose2fa.addEventListener('click', closeSamsara2FAModal);
-  if (btnCancel2fa) btnCancel2fa.addEventListener('click', closeSamsara2FAModal);
 
   if (btnSubmitLogin) {
     btnSubmitLogin.addEventListener('click', async () => {
-      const email = document.getElementById('samsara-login-email')?.value.trim();
-      const password = document.getElementById('samsara-login-password')?.value;
       const errEl = document.getElementById('samsara-login-error');
-      if (!email || !password) {
-        if (errEl) { errEl.textContent = 'Please enter both email and password'; errEl.style.display = 'block'; }
-        return;
-      }
-      const orgText = btnSubmitLogin.innerHTML;
-      btnSubmitLogin.innerHTML = 'Connecting...';
-      btnSubmitLogin.disabled = true;
+      const statusEl = document.getElementById('samsara-auth-status');
       if (errEl) errEl.style.display = 'none';
 
+      const orgText = btnSubmitLogin.innerHTML;
+      btnSubmitLogin.innerHTML = '⏳ Opening...';
+      btnSubmitLogin.disabled = true;
+
       try {
-        const res = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/login`, 'POST', { username: email, password });
-        if (res.needs2FA) {
-          openSamsara2FAModal();
-        } else if (res.success) {
-          if (res.cookies) localStorage.setItem('samsara_session_cookies', res.cookies);
-          if (res.csrfToken) localStorage.setItem('samsara_csrf_token', res.csrfToken);
+        // Step 1: Tell the server to activate the Samsara proxy
+        const startRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/auth-start`, 'GET');
+        if (!startRes.success) throw new Error('Failed to start auth flow');
+
+        // Step 2: Open the Samsara login page in a popup (routed through our proxy)
+        const loginUrl = `${SamsaraEngine.PROXY_BASE}/signin`;
+        const popup = window.open(loginUrl, 'samsara-login', 'width=520,height=700,scrollbars=yes');
+
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '⏳ Waiting for you to log in...'; }
+        btnSubmitLogin.innerHTML = '⏳ Waiting for login...';
+
+        // Step 3: Listen for success message from popup OR poll status
+        let authDone = false;
+
+        const onMessage = (event) => {
+          if (event.data?.type === 'samsara-auth-success') {
+            authDone = true;
+            window.removeEventListener('message', onMessage);
+          }
+        };
+        window.addEventListener('message', onMessage);
+
+        // Poll every 2 seconds for up to 3 minutes
+        for (let i = 0; i < 90 && !authDone; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+
+          // Check if popup was closed without completing
+          if (popup && popup.closed && !authDone) {
+            try {
+              const statusRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/status`, 'GET');
+              if (statusRes.connected || statusRes.cookies) {
+                authDone = true;
+                if (statusRes.cookies) localStorage.setItem('samsara_session_cookies', statusRes.cookies);
+                if (statusRes.csrfToken) localStorage.setItem('samsara_csrf_token', statusRes.csrfToken);
+              }
+            } catch (e) {}
+            if (!authDone) {
+              if (statusEl) statusEl.style.display = 'none';
+              if (errEl) { errEl.textContent = 'Login window was closed. Try again.'; errEl.style.display = 'block'; }
+              break;
+            }
+          }
+
+          // Poll server for auth status
+          try {
+            const statusRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/status`, 'GET');
+            if (statusRes.connected || statusRes.cookies) {
+              authDone = true;
+              if (statusRes.cookies) localStorage.setItem('samsara_session_cookies', statusRes.cookies);
+              if (statusRes.csrfToken) localStorage.setItem('samsara_csrf_token', statusRes.csrfToken);
+            }
+          } catch (e) {}
+        }
+
+        window.removeEventListener('message', onMessage);
+
+        if (authDone) {
+          if (statusEl) statusEl.style.display = 'none';
           closeSamsaraConnectionModal();
           const statusBadge = document.getElementById('tracker-api-status');
           if (statusBadge) {
@@ -595,11 +625,14 @@ setTimeout(() => {
             statusBadge.style.color = '#2ecc71';
             statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
           }
-        } else {
-          if (errEl) { errEl.textContent = res.message || 'Login failed'; errEl.style.display = 'block'; }
+        } else if (!popup || !popup.closed) {
+          if (statusEl) statusEl.style.display = 'none';
+          if (errEl) { errEl.textContent = 'Login timed out. Please try again.'; errEl.style.display = 'block'; }
         }
+
       } catch (e) {
-        if (errEl) { errEl.textContent = e.data?.message || e.message || 'Network error connecting to proxy'; errEl.style.display = 'block'; }
+        if (errEl) { errEl.textContent = e.message || 'Failed to open login'; errEl.style.display = 'block'; }
+        if (statusEl) statusEl.style.display = 'none';
       } finally {
         btnSubmitLogin.innerHTML = orgText;
         btnSubmitLogin.disabled = false;
@@ -607,42 +640,7 @@ setTimeout(() => {
     });
   }
 
-  if (btnSubmit2fa) {
-    btnSubmit2fa.addEventListener('click', async () => {
-      const code = document.getElementById('samsara-2fa-code')?.value.trim();
-      const errEl = document.getElementById('samsara-2fa-error');
-      if (!code) {
-        if (errEl) { errEl.textContent = 'Please enter the verification code'; errEl.style.display = 'block'; }
-        return;
-      }
-      const orgText = btnSubmit2fa.innerHTML;
-      btnSubmit2fa.innerHTML = 'Verifying...';
-      btnSubmit2fa.disabled = true;
-      if (errEl) errEl.style.display = 'none';
 
-      try {
-        const res = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/verify`, 'POST', { code });
-        if (res.success) {
-          if (res.cookies) localStorage.setItem('samsara_session_cookies', res.cookies);
-          if (res.csrfToken) localStorage.setItem('samsara_csrf_token', res.csrfToken);
-          closeSamsara2FAModal();
-          const statusBadge = document.getElementById('tracker-api-status');
-          if (statusBadge) {
-            statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
-            statusBadge.style.color = '#2ecc71';
-            statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
-          }
-        } else {
-          if (errEl) { errEl.textContent = res.message || 'Verification failed'; errEl.style.display = 'block'; }
-        }
-      } catch (e) {
-        if (errEl) { errEl.textContent = e.data?.message || e.message || 'Network error verifying code'; errEl.style.display = 'block'; }
-      } finally {
-        btnSubmit2fa.innerHTML = orgText;
-        btnSubmit2fa.disabled = false;
-      }
-    });
-  }
 }, 100);
 
 /**

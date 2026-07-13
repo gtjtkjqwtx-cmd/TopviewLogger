@@ -22,6 +22,7 @@
     "cheerio": "^1.2.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "http-proxy-middleware": "^3.0.7",
     "playwright": "^1.59.1",
     "puppeteer": "^24.4.0",
     "puppeteer-extra": "^3.3.6",

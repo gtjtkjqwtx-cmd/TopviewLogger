@@ -7,20 +7,19 @@
  *   1. GET the login page to harvest __VIEWSTATE and hidden fields
  *   2. POST credentials with the harvested hidden fields
  *   3. Return the authentication result and session cookies
+ *
+ * Also provides a transparent reverse proxy for Samsara authentication,
+ * allowing users to log in via their real browser.
  */
 
 import express from 'express';
 import cors from 'cors';
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import chromium from '@sparticuz/chromium';
-
-puppeteer.use(StealthPlugin());
+import { createProxyMiddleware } from 'http-proxy-middleware';
 
 let samsaraSessionCookies = null;
 let samsaraCsrfToken = null;
-let samsaraPendingPage = null;
-let samsaraPendingBrowser = null;
+let samsaraAuthActive = false;
+let samsaraCapturedCookies = {};
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -331,200 +330,56 @@ app.get('/api/samsara/proxy', async (req, res) => {
 });
 
 // ============================================================
-// SAMSARA SPA WORKAROUND ENDPOINTS (PUPPETEER + GRAPHQL)
+// SAMSARA BROWSER AUTH PROXY
 // ============================================================
 
+// Status endpoint - frontend polls this to check if login succeeded
 app.get('/api/samsara/status', (req, res) => {
+  const cookieString = Object.values(samsaraCapturedCookies).join('; ');
   res.json({
     connected: Boolean(samsaraSessionCookies && samsaraCsrfToken),
-    hasPending2FA: Boolean(samsaraPendingPage)
+    loginDetected: samsaraAuthActive === false && Object.keys(samsaraCapturedCookies).length > 0,
+    cookies: samsaraSessionCookies || (Object.keys(samsaraCapturedCookies).length > 0 ? cookieString : null),
+    csrfToken: samsaraCsrfToken
   });
 });
 
-app.post('/api/samsara/login', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ success: false, message: 'Username and password are required.' });
-  }
-
-  try {
-    if (samsaraPendingBrowser) {
-      try { await samsaraPendingBrowser.close(); } catch (e) {}
-      samsaraPendingBrowser = null;
-      samsaraPendingPage = null;
-    }
-
-    const isProductionLinux = Boolean(process.platform === 'linux' && (process.env.NODE_ENV === 'production' || process.env.RENDER || process.env.PORT));
-    let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-    if (!executablePath && isProductionLinux) {
-      try {
-        console.log('[SamsaraLogin] Resolving @sparticuz/chromium standalone path for Linux/Render...');
-        executablePath = await chromium.executablePath();
-        console.log('[SamsaraLogin] Resolved standalone path:', executablePath);
-      } catch (err) {
-        console.warn('[SamsaraLogin] Could not get sparticuz chromium path:', err.message);
-      }
-    }
-
-    const launchOptions = {
-      headless: isProductionLinux ? chromium.headless : 'new',
-      args: isProductionLinux ? [...chromium.args, '--disable-gpu', '--no-sandbox'] : ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-      defaultViewport: isProductionLinux ? chromium.defaultViewport : { width: 1280, height: 720 },
-      executablePath: executablePath || undefined
-    };
-
-    console.log('[SamsaraLogin] Launching Puppeteer browser on platform:', process.platform, 'isProductionLinux:', isProductionLinux);
-    const browser = await puppeteer.launch(launchOptions);
-    const page = await browser.newPage();
-
-    // Watch all requests to capture X-Csrf-Token
-    await page.setRequestInterception(true);
-    page.on('request', (request) => {
-      const headers = request.headers();
-      if (headers['x-csrf-token'] || headers['X-Csrf-Token']) {
-        samsaraCsrfToken = headers['x-csrf-token'] || headers['X-Csrf-Token'];
-        console.log('[SamsaraLogin] Intercepted X-Csrf-Token:', samsaraCsrfToken);
-      }
-      request.continue();
-    });
-
-    await page.goto('https://cloud.samsara.com/signin', { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-    // Type Email / Username
-    await page.waitForSelector('input[type="email"], input[name*="email" i], input[placeholder*="email" i]', { timeout: 20000 });
-    await page.type('input[type="email"], input[name*="email" i], input[placeholder*="email" i]', username, { delay: 35 });
-
-    // Try clicking Next if two-step form
-    const nextBtn = await page.$('button[type="submit"], button:has-text("Next")');
-    if (nextBtn) {
-      await nextBtn.click();
-      await new Promise(r => setTimeout(r, 2000));
-    }
-
-    // Type Password
-    await page.waitForSelector('input[type="password"]', { timeout: 20000 });
-    await page.type('input[type="password"]', password, { delay: 35 });
-
-    // Click Sign In
-    const signInBtns = await page.$$('button');
-    let clickedSignIn = false;
-    for (const btn of signInBtns) {
-      const txt = await page.evaluate(el => el.textContent || '', btn);
-      if (/sign in|log in|submit|continue/i.test(txt)) {
-        await btn.click();
-        clickedSignIn = true;
-        break;
-      }
-    }
-    if (!clickedSignIn && signInBtns[0]) await signInBtns[0].click();
-
-    console.log('[SamsaraLogin] Credentials submitted, waiting for navigation or 2FA...');
-    await new Promise(r => setTimeout(r, 6000));
-
-    const pageContent = await page.content();
-    const currentUrl = page.url();
-
-    // Check for 2FA / Verification Email
-    if (/send me an email|verification email|enter code|verify/i.test(pageContent) || /verify|mfa|challenge/i.test(currentUrl)) {
-      console.log('[SamsaraLogin] 2FA Verification page detected.');
-
-      // Click "Send me an email" if present
-      const buttons = await page.$$('button');
-      for (const btn of buttons) {
-        const txt = await page.evaluate(el => el.textContent || '', btn);
-        if (/send me an email/i.test(txt)) {
-          console.log('[SamsaraLogin] Clicking "Send me an email" button...');
-          await btn.click();
-          await new Promise(r => setTimeout(r, 3000));
-          break;
-        }
-      }
-
-      samsaraPendingBrowser = browser;
-      samsaraPendingPage = page;
-      return res.json({ success: false, needs2FA: true, message: 'Verification code sent to your email.' });
-    }
-
-    // If Dashboard loaded or CSRF captured
-    if (/fleet|list|bounds|\/o\//i.test(currentUrl) || samsaraCsrfToken) {
-      const cookiesArr = await page.cookies();
-      samsaraSessionCookies = cookiesArr.map(c => `${c.name}=${c.value}`).join('; ');
-      console.log('[SamsaraLogin] Login successful! Extracted cookies.');
-      await browser.close();
-      return res.json({ success: true, message: 'Connected to Samsara', cookies: samsaraSessionCookies, csrfToken: samsaraCsrfToken });
-    }
-
-    // Otherwise check error
-    const errorTextMatch = pageContent.match(/invalid email or password|incorrect password|could not sign you in/i);
-    await browser.close();
-    if (errorTextMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid username or password.' });
-    }
-    return res.status(401).json({ success: false, message: 'Login failed or timed out during sign-in.' });
-
-  } catch (err) {
-    console.error('[SamsaraLogin] Error:', err);
-    if (samsaraPendingBrowser) {
-      try { await samsaraPendingBrowser.close(); } catch (e) {}
-      samsaraPendingBrowser = null;
-      samsaraPendingPage = null;
-    }
-    return res.status(500).json({ success: false, message: 'Server error during login: ' + err.message });
-  }
+// Start the auth flow - enables the reverse proxy
+app.get('/api/samsara/auth-start', (req, res) => {
+  samsaraAuthActive = true;
+  samsaraCapturedCookies = {};
+  samsaraCsrfToken = null;
+  samsaraSessionCookies = null;
+  console.log('[SamsaraAuth] Auth flow started. Proxy activated.');
+  res.json({ success: true, loginUrl: '/signin' });
 });
 
-app.post('/api/samsara/verify', async (req, res) => {
-  const { code } = req.body;
-  if (!code) return res.status(400).json({ success: false, message: 'Verification code required.' });
-  if (!samsaraPendingPage || !samsaraPendingBrowser) {
-    return res.status(400).json({ success: false, message: 'No pending login session found. Please login again.' });
-  }
+// Success page - shown after login redirect is detected
+app.get('/samsara-auth-success', (req, res) => {
+  samsaraAuthActive = false;
+  const cookieString = Object.values(samsaraCapturedCookies).join('; ');
+  samsaraSessionCookies = cookieString;
+  console.log('[SamsaraAuth] Auth complete. Cookies captured:', Object.keys(samsaraCapturedCookies).length);
+  console.log('[SamsaraAuth] CSRF token:', samsaraCsrfToken);
+  res.send(`<!DOCTYPE html><html><head><title>Connected</title></head>
+<body style="background:#0a0e14;color:#2ecc71;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;">
+<h1 style="font-size:3rem;margin-bottom:0.5rem;">&#x2705;</h1>
+<h2>Samsara Connected!</h2>
+<p style="color:#8899aa;font-size:0.9rem;">You can close this window now.</p>
+<script>
+if(window.opener){window.opener.postMessage({type:'samsara-auth-success'},'*');}
+setTimeout(()=>window.close(),2000);
+</script></body></html>`);
+});
 
-  try {
-    console.log('[SamsaraVerify] Typing verification code...');
-    await samsaraPendingPage.waitForSelector('input[type="text"], input[type="number"], input[placeholder*="code" i], input', { timeout: 15000 });
-    const inputs = await samsaraPendingPage.$$('input');
-    if (inputs.length > 0) {
-      await inputs[0].type(code, { delay: 40 });
-    }
-
-    // Click Submit/Verify button or press Enter
-    const buttons = await samsaraPendingPage.$$('button');
-    let clicked = false;
-    for (const btn of buttons) {
-      const txt = await samsaraPendingPage.evaluate(el => el.textContent || '', btn);
-      if (/verify|submit|confirm|continue/i.test(txt)) {
-        await btn.click();
-        clicked = true;
-        break;
-      }
-    }
-    if (!clicked) await samsaraPendingPage.keyboard.press('Enter');
-
-    console.log('[SamsaraVerify] Waiting for dashboard redirect...');
-    await new Promise(r => setTimeout(r, 7000));
-
-    const cookiesArr = await samsaraPendingPage.cookies();
-    samsaraSessionCookies = cookiesArr.map(c => `${c.name}=${c.value}`).join('; ');
-    
-    await samsaraPendingBrowser.close();
-    samsaraPendingBrowser = null;
-    samsaraPendingPage = null;
-
-    if (!samsaraSessionCookies) {
-      return res.status(401).json({ success: false, message: 'Verification failed to acquire cookies.' });
-    }
-
-    return res.json({ success: true, message: 'Verified and connected to Samsara', cookies: samsaraSessionCookies, csrfToken: samsaraCsrfToken });
-  } catch (err) {
-    console.error('[SamsaraVerify] Error:', err);
-    if (samsaraPendingBrowser) {
-      try { await samsaraPendingBrowser.close(); } catch (e) {}
-      samsaraPendingBrowser = null;
-      samsaraPendingPage = null;
-    }
-    return res.status(500).json({ success: false, message: 'Verification error: ' + err.message });
-  }
+// Reset auth state
+app.post('/api/samsara/auth-reset', (req, res) => {
+  samsaraAuthActive = false;
+  samsaraCapturedCookies = {};
+  samsaraCsrfToken = null;
+  samsaraSessionCookies = null;
+  console.log('[SamsaraAuth] Session reset.');
+  res.json({ success: true });
 });
 
 app.post('/api/samsara/fleet', async (req, res) => {
@@ -622,7 +477,7 @@ app.post('/api/samsara/fleet', async (req, res) => {
 
 // ── Health Check ──
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'online', service: 'countif-proxy', version: '10.1.3-maclocal' });
+  res.json({ status: 'online', service: 'countif-proxy', version: '11.0.0-authproxy' });
 });
 
 // ── Utility: Extract hidden field value from HTML ──
@@ -638,8 +493,66 @@ function extractHiddenField(html, fieldName) {
   return match2 ? match2[1] : null;
 }
 
+// ============================================================
+// SAMSARA REVERSE PROXY (catch-all - MUST be registered last)
+// ============================================================
+
+const samsaraProxy = createProxyMiddleware({
+  target: 'https://cloud.samsara.com',
+  changeOrigin: true,
+  secure: true,
+  ws: true,
+  selfHandleResponse: false,
+  on: {
+    proxyReq: (proxyReq, req) => {
+      proxyReq.setHeader('Host', 'cloud.samsara.com');
+      const csrf = req.headers['x-csrf-token'];
+      if (csrf) {
+        samsaraCsrfToken = csrf;
+        console.log('[SamsaraAuth] Captured CSRF token:', csrf);
+      }
+    },
+    proxyRes: (proxyRes, req, res) => {
+      delete proxyRes.headers['x-frame-options'];
+      delete proxyRes.headers['content-security-policy'];
+      delete proxyRes.headers['content-security-policy-report-only'];
+
+      const setCookieHeaders = proxyRes.headers['set-cookie'];
+      if (setCookieHeaders) {
+        const rewritten = setCookieHeaders.map(cookie => {
+          const nameMatch = cookie.match(/^([^=]+)=([^;]*)/);
+          if (nameMatch) {
+            samsaraCapturedCookies[nameMatch[1].trim()] = nameMatch[1].trim() + '=' + nameMatch[2];
+            console.log('[SamsaraAuth] Captured cookie:', nameMatch[1].trim());
+          }
+          return cookie
+            .replace(/;\s*Secure/gi, '')
+            .replace(/;\s*Domain=[^;]*/gi, '')
+            .replace(/;\s*SameSite=None/gi, '; SameSite=Lax');
+        });
+        proxyRes.headers['set-cookie'] = rewritten;
+      }
+
+      const location = proxyRes.headers['location'];
+      if (location && /\/o\/|\/fleet|\/dashboard|\/d\//i.test(location)) {
+        console.log('[SamsaraAuth] Login redirect detected:', location);
+        proxyRes.headers['location'] = '/samsara-auth-success';
+      }
+    }
+  }
+});
+
+// Catch-all: proxy non-API requests to Samsara ONLY when auth is active
+app.use((req, res, next) => {
+  if (samsaraAuthActive && !req.originalUrl.startsWith('/api/')) {
+    return samsaraProxy(req, res, next);
+  }
+  next();
+});
+
 app.listen(PORT, () => {
   console.log(`[CountIf Proxy] Online at http://localhost:${PORT}`);
   console.log(`[CountIf Proxy] POST /api/countif/login`);
+  console.log(`[CountIf Proxy] GET  /api/samsara/auth-start -> opens browser login`);
   console.log(`[CountIf Proxy] GET  /api/health`);
 });
