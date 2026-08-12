@@ -1,8 +1,9 @@
-name: Build Android APK
+name: Aug 12 Fixes - Android
 
 on:
   push:
-    branches: [ build-apk ]
+    branches: [ build-apk, main ]
+  workflow_dispatch:
 
 permissions:
   contents: write

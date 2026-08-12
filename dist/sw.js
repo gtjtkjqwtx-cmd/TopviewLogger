@@ -2,9 +2,6 @@ const CACHE_NAME = 'topview-logger-v10.0.0';
 const ASSETS = [
   '/',
   '/index.html',
-  '/styles.css',
-  '/app.js',
-  '/samsara_engine.js',
   '/manifest.json',
   '/icon-512.png',
   '/tracker-map.png',

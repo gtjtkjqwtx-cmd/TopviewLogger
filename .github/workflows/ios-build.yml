@@ -1,8 +1,8 @@
-name: Updated Maps and New Version
+name: Aug 12 Fixes - iOS
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, build-apk ]
   workflow_dispatch:
 
 jobs:

@@ -152,6 +152,9 @@ function showView(targetId) {
   
   if (targetId === 'sw-dashboard') checkSwResume();
   if (targetId === 'fl-dashboard') checkFlResume();
+  if (typeof refreshAllLoginsOnEntry === 'function' && targetId !== 'login') {
+    refreshAllLoginsOnEntry(true);
+  }
 }
 
 // Back buttons
@@ -731,6 +734,87 @@ function countifSetBadge(text, color) {
     trackerBadge.style.background = c.bg;
     trackerBadge.style.color = c.fg;
     trackerBadge.innerHTML = `<div class="status-dot" style="width:6px; height:6px; background:${c.fg};"></div><span>${text}</span>`;
+  }
+}
+
+/**
+ * Automatically checks, restores, and verifies Samsara & CountIf logins on entry
+ * Runs when the app starts, when returning to the foreground, or when navigating between screens.
+ */
+async function refreshAllLoginsOnEntry(isSilent = true) {
+  if (!isSilent) console.log("[AuthRefresh] Refreshing all logins on entry...");
+
+  // 1. Check & Restore Samsara (GPS Tracker) status
+  const statusBadge = document.getElementById('tracker-api-status');
+  const storedSamsaraCookies = typeof localStorage !== 'undefined' ? localStorage.getItem('samsara_session_cookies') : null;
+  const storedCsrf = typeof localStorage !== 'undefined' ? localStorage.getItem('samsara_csrf_token') : null;
+
+  // Immediately show local cached status if cookies exist so UI is responsive
+  if (storedSamsaraCookies && statusBadge) {
+    statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+    statusBadge.style.color = '#2ecc71';
+    statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
+  }
+
+  try {
+    const statusRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/status`, 'GET');
+    if (statusRes.connected || statusRes.cookies) {
+      if (statusRes.cookies) localStorage.setItem('samsara_session_cookies', statusRes.cookies);
+      if (statusRes.csrfToken) localStorage.setItem('samsara_csrf_token', statusRes.csrfToken);
+      if (statusBadge) {
+        statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+        statusBadge.style.color = '#2ecc71';
+        statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
+      }
+    } else if (storedSamsaraCookies) {
+      // Server proxy might have restarted; check if local session cookies are still valid
+      try {
+        const testRes = await SamsaraEngine.findBusesNearStop(0, 0, 10);
+        if (testRes && Array.isArray(testRes)) {
+          if (statusBadge) {
+            statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+            statusBadge.style.color = '#2ecc71';
+            statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
+          }
+        }
+      } catch (err) {
+        if (err.message && err.message.toLowerCase().includes('expired')) {
+          localStorage.removeItem('samsara_session_cookies');
+          if (statusBadge) {
+            statusBadge.style.background = 'rgba(231, 76, 60, 0.2)';
+            statusBadge.style.color = '#e74c3c';
+            statusBadge.innerHTML = '<div class="status-dot" style="background:#e74c3c;"></div><span>Session Expired</span>';
+          }
+        }
+      }
+    } else if (statusBadge && !storedSamsaraCookies) {
+      statusBadge.style.background = 'rgba(255,255,255,0.05)';
+      statusBadge.style.color = 'rgba(255,255,255,0.4)';
+      statusBadge.innerHTML = '<div class="status-dot"></div><span>Disconnected</span>';
+    }
+  } catch (e) {
+    if (!isSilent) console.warn("[AuthRefresh] Could not reach server proxy for Samsara check:", e.message);
+  }
+
+  // 2. Check & Restore CountIf (Dispatch Portal) status
+  const dispatchBadge = document.getElementById('tracker-dispatch-status');
+  if (portalSessionCookie || (typeof localStorage !== 'undefined' && localStorage.getItem('portal_session_cookie'))) {
+    if (!portalSessionCookie) {
+      portalSessionCookie = localStorage.getItem('portal_session_cookie');
+    }
+    if (dispatchBadge) {
+      dispatchBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+      dispatchBadge.style.color = '#2ecc71';
+      dispatchBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71; width: 6px; height: 6px;"></div><span>Dispatch Active</span>';
+    }
+    countifSetBadge('Synced', 'green');
+    if (!isSilent || !portalData || portalData.length === 0) {
+      fetchDispatchData();
+    }
+  } else if (dispatchBadge) {
+    dispatchBadge.style.background = 'rgba(255,255,255,0.05)';
+    dispatchBadge.style.color = 'rgba(255,255,255,0.4)';
+    dispatchBadge.innerHTML = '<div class="status-dot" style="width: 6px; height: 6px;"></div><span>Dispatch Idle</span>';
   }
 }
 
@@ -1318,21 +1402,8 @@ function openReportViewer(content, title, onUpdateCallback) {
     if (line.match(/^[-=]+$/)) text.classList.add('separator-line');
     text.textContent = line || ' ';
     
-    if (!line.match(/^[-=]+$/) && line.trim() !== '') {
-      text.contentEditable = true;
-      text.style.borderBottom = "1px dashed rgba(255, 255, 255, 0.25)";
-      text.style.padding = "2px 4px";
-      text.style.borderRadius = "4px";
-      text.style.outline = "none";
-      text.title = "Click to edit line";
-      text.addEventListener('input', () => {
-        lines[idx] = text.textContent;
-        currentReportText = lines.join('\n');
-        if (typeof onUpdateCallback === 'function') {
-          onUpdateCallback(currentReportText);
-        }
-      });
-    }
+    // Report lines are read-only (freetyping disabled per user requirement)
+    text.style.padding = "2px 4px";
 
     const btnContainer = document.createElement('div');
     btnContainer.style.display = 'flex';
@@ -3150,3 +3221,10 @@ document.getElementById('lc-btn-complete')?.addEventListener('click', () => {
 });
 
 console.log("Topview Logger V10.0.0 operational.");
+
+// Prevent browser/webview undo actions on shake/keycombos if fired
+window.addEventListener('beforeinput', (e) => {
+  if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
+    e.preventDefault();
+  }
+});

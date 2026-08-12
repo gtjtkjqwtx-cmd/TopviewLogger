@@ -497,15 +497,151 @@ function extractHiddenField(html, fieldName) {
 // SAMSARA REVERSE PROXY (catch-all - MUST be registered last)
 // ============================================================
 
+// Helper: strip security headers that block rendering through the proxy
+function stripSecurityHeaders(proxyRes) {
+  delete proxyRes.headers['x-frame-options'];
+  delete proxyRes.headers['content-security-policy'];
+  delete proxyRes.headers['content-security-policy-report-only'];
+  delete proxyRes.headers['strict-transport-security'];
+  delete proxyRes.headers['x-content-type-options'];
+}
+
+// Helper: capture and rewrite Set-Cookie headers from Samsara
+function captureCookies(proxyRes) {
+  const setCookieHeaders = proxyRes.headers['set-cookie'];
+  if (setCookieHeaders) {
+    const rewritten = setCookieHeaders.map(cookie => {
+      const nameMatch = cookie.match(/^([^=]+)=([^;]*)/);
+      if (nameMatch) {
+        samsaraCapturedCookies[nameMatch[1].trim()] = nameMatch[1].trim() + '=' + nameMatch[2];
+        console.log('[SamsaraAuth] Captured cookie:', nameMatch[1].trim());
+      }
+      return cookie
+        .replace(/;\s*Secure/gi, '')
+        .replace(/;\s*Domain=[^;]*/gi, '')
+        .replace(/;\s*SameSite=None/gi, '; SameSite=Lax');
+    });
+    proxyRes.headers['set-cookie'] = rewritten;
+  }
+}
+
+// Helper: rewrite Location headers to stay within the proxy
+function rewriteLocationHeader(proxyRes) {
+  const location = proxyRes.headers['location'];
+  if (!location) return;
+
+  // Post-login redirect → success page
+  if (/\/o\/|\/fleet|\/dashboard|\/d\//i.test(location)) {
+    console.log('[SamsaraAuth] Login redirect detected:', location);
+    proxyRes.headers['location'] = '/samsara-auth-success';
+    return;
+  }
+
+  // Rewrite absolute Samsara URLs to stay within proxy
+  let rewritten = location;
+  rewritten = rewritten.replace(/https?:\/\/cloud\.samsara\.com/gi, '');
+  rewritten = rewritten.replace(/https?:\/\/[a-z0-9-]+\.cloud\.samsara\.com/gi, '');
+  if (rewritten !== location) {
+    console.log('[SamsaraAuth] Rewrote redirect:', location, '->', rewritten);
+    proxyRes.headers['location'] = rewritten;
+  }
+}
+
+// Helper: forward accumulated browser cookies to Samsara
+function forwardCookies(proxyReq, req) {
+  // Merge browser cookies with any we've captured server-side
+  const browserCookies = req.headers.cookie || '';
+  const serverCookies = Object.values(samsaraCapturedCookies).join('; ');
+  const merged = [browserCookies, serverCookies].filter(Boolean).join('; ');
+  if (merged) {
+    proxyReq.setHeader('Cookie', merged);
+  }
+}
+
+// Helper: rewrite HTML content to route Samsara URLs through our proxy
+function rewriteSamsaraHtml(html) {
+  let result = html;
+  // Rewrite absolute URLs to cloud.samsara.com → relative (stays in our proxy)
+  result = result.replace(/https?:\/\/cloud\.samsara\.com/gi, '');
+  // Rewrite WebSocket/GraphQL subdomain URLs → /ws-proxy/
+  result = result.replace(/https?:\/\/([a-z0-9-]+)\.cloud\.samsara\.com/gi, '/ws-proxy/$1');
+  // Rewrite static.samsara.com → /static-proxy/
+  result = result.replace(/https?:\/\/static\.samsara\.com/gi, '/static-proxy');
+  return result;
+}
+
+// ── Subdomain proxy: static.samsara.com ──
+const staticSamsaraProxy = createProxyMiddleware({
+  target: 'https://static.samsara.com',
+  changeOrigin: true,
+  secure: true,
+  pathRewrite: { '^/static-proxy': '' },
+  on: {
+    proxyReq: (proxyReq) => {
+      proxyReq.setHeader('Host', 'static.samsara.com');
+    },
+    proxyRes: (proxyRes) => {
+      stripSecurityHeaders(proxyRes);
+    }
+  }
+});
+app.use('/static-proxy', (req, res, next) => {
+  if (samsaraAuthActive) return staticSamsaraProxy(req, res, next);
+  next();
+});
+
+// ── Subdomain proxy: *.cloud.samsara.com (WebSocket/GraphQL) ──
+// Handles paths like /ws-proxy/us6-ws/r/graphql
+app.use('/ws-proxy', (req, res, next) => {
+  if (!samsaraAuthActive) return next();
+
+  // Extract the subdomain from the path: /ws-proxy/us6-ws/r/graphql → subdomain=us6-ws
+  const pathParts = req.url.split('/').filter(Boolean);
+  const subdomain = pathParts[0];
+  if (!subdomain) return next();
+
+  const target = `https://${subdomain}.cloud.samsara.com`;
+  const remainingPath = '/' + pathParts.slice(1).join('/');
+  req.url = remainingPath;
+
+  const wsProxy = createProxyMiddleware({
+    target,
+    changeOrigin: true,
+    secure: true,
+    on: {
+      proxyReq: (proxyReq, req) => {
+        proxyReq.setHeader('Host', `${subdomain}.cloud.samsara.com`);
+        proxyReq.setHeader('Origin', 'https://cloud.samsara.com');
+        proxyReq.setHeader('Referer', 'https://cloud.samsara.com/');
+        forwardCookies(proxyReq, req);
+        const csrf = req.headers['x-csrf-token'];
+        if (csrf) {
+          samsaraCsrfToken = csrf;
+          console.log('[SamsaraAuth] Captured CSRF from ws-proxy:', csrf);
+        }
+      },
+      proxyRes: (proxyRes) => {
+        stripSecurityHeaders(proxyRes);
+        captureCookies(proxyRes);
+      }
+    }
+  });
+  return wsProxy(req, res, next);
+});
+
+// ── Main Samsara proxy (cloud.samsara.com) with HTML rewriting ──
 const samsaraProxy = createProxyMiddleware({
   target: 'https://cloud.samsara.com',
   changeOrigin: true,
   secure: true,
   ws: true,
-  selfHandleResponse: false,
+  selfHandleResponse: true, // We intercept responses to rewrite HTML
   on: {
     proxyReq: (proxyReq, req) => {
       proxyReq.setHeader('Host', 'cloud.samsara.com');
+      proxyReq.setHeader('Origin', 'https://cloud.samsara.com');
+      proxyReq.setHeader('Referer', 'https://cloud.samsara.com/');
+      forwardCookies(proxyReq, req);
       const csrf = req.headers['x-csrf-token'];
       if (csrf) {
         samsaraCsrfToken = csrf;
@@ -513,30 +649,33 @@ const samsaraProxy = createProxyMiddleware({
       }
     },
     proxyRes: (proxyRes, req, res) => {
-      delete proxyRes.headers['x-frame-options'];
-      delete proxyRes.headers['content-security-policy'];
-      delete proxyRes.headers['content-security-policy-report-only'];
+      stripSecurityHeaders(proxyRes);
+      captureCookies(proxyRes);
+      rewriteLocationHeader(proxyRes);
 
-      const setCookieHeaders = proxyRes.headers['set-cookie'];
-      if (setCookieHeaders) {
-        const rewritten = setCookieHeaders.map(cookie => {
-          const nameMatch = cookie.match(/^([^=]+)=([^;]*)/);
-          if (nameMatch) {
-            samsaraCapturedCookies[nameMatch[1].trim()] = nameMatch[1].trim() + '=' + nameMatch[2];
-            console.log('[SamsaraAuth] Captured cookie:', nameMatch[1].trim());
-          }
-          return cookie
-            .replace(/;\s*Secure/gi, '')
-            .replace(/;\s*Domain=[^;]*/gi, '')
-            .replace(/;\s*SameSite=None/gi, '; SameSite=Lax');
+      const contentType = (proxyRes.headers['content-type'] || '').toLowerCase();
+      const isHtmlOrJs = contentType.includes('text/html') || contentType.includes('javascript');
+
+      if (isHtmlOrJs) {
+        // Collect the response body, rewrite URLs, then send
+        const chunks = [];
+        proxyRes.on('data', chunk => chunks.push(chunk));
+        proxyRes.on('end', () => {
+          let body = Buffer.concat(chunks).toString('utf8');
+          body = rewriteSamsaraHtml(body);
+
+          // Copy headers (except content-length since we modified the body)
+          const headers = { ...proxyRes.headers };
+          delete headers['content-length'];
+          delete headers['content-encoding']; // We decoded it, don't claim gzip
+          res.writeHead(proxyRes.statusCode, headers);
+          res.end(body);
         });
-        proxyRes.headers['set-cookie'] = rewritten;
-      }
-
-      const location = proxyRes.headers['location'];
-      if (location && /\/o\/|\/fleet|\/dashboard|\/d\//i.test(location)) {
-        console.log('[SamsaraAuth] Login redirect detected:', location);
-        proxyRes.headers['location'] = '/samsara-auth-success';
+      } else {
+        // Non-HTML: pass through as-is (images, fonts, JSON, etc.)
+        const headers = { ...proxyRes.headers };
+        res.writeHead(proxyRes.statusCode, headers);
+        proxyRes.pipe(res);
       }
     }
   }
