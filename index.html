@@ -300,9 +300,14 @@
             </button>
           </div>
           <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-            <div id="tracker-api-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4);">
-              <div class="status-dot"></div>
-              <span>Waiting...</span>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div id="tracker-api-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4);">
+                <div class="status-dot"></div>
+                <span>Waiting...</span>
+              </div>
+              <button id="btn-samsara-logout" class="violation-btn-sm" style="display: none; height: 22px; padding: 0 8px; border-radius: 6px; background: rgba(231, 76, 60, 0.15); border: 1px solid rgba(231, 76, 60, 0.3); font-size: 0.65rem; font-weight: 700; color: #e74c3c; cursor: pointer; align-items: center; justify-content: center;" title="Sign Out of Samsara">
+                <span>Sign Out</span>
+              </button>
             </div>
             <div id="tracker-dispatch-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); font-size: 0.65rem; padding: 2px 8px;">
               <div class="status-dot" style="width: 6px; height: 6px;"></div>
@@ -930,25 +935,86 @@
     </div>
   </div>
 
-  <!-- ============ SAMSARA CONNECTION MODAL ============ -->
-  <div id="samsara-connection-modal" class="modal-overlay">
-    <div class="modal card" style="max-width: 420px; width: 95%; padding: 1.5rem;">
-      <header class="modal-header" style="margin-bottom: 1.2rem;">
-        <div>
-          <h3 style="margin: 0 0 4px 0; display: flex; align-items: center; gap: 8px;">🛰️ Samsara Connection</h3>
-          <p class="subtitle" style="margin: 0; font-size: 0.8rem; color: var(--text-secondary);">Connect live fleet tracking via your Samsara account</p>
+  <!-- ============ IN-APP BROWSER & LIVE OVERLAY ============ -->
+  <div id="inapp-browser-modal" class="modal-overlay" style="padding: 0; z-index: 10000; align-items: stretch; justify-content: stretch;">
+    <div class="inapp-browser-container" style="display: flex; flex-direction: column; width: 100%; height: 100%; background: #0e131a; position: relative;">
+      
+      <!-- Top Navigation & Address Bar Row -->
+      <header class="inapp-browser-nav" style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(18, 24, 33, 0.95); border-bottom: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(20px); z-index: 20;">
+        <button id="btn-browser-back" class="icon-btn-sm" title="Back" style="margin:0;"><svg class="icon-xs"><use href="#icon-chevron-left"/></svg></button>
+        <button id="btn-browser-forward" class="icon-btn-sm" title="Forward" style="margin:0;"><svg class="icon-xs"><use href="#icon-chevron-right"/></svg></button>
+        <button id="btn-browser-reload" class="icon-btn-sm" title="Reload" style="margin:0;"><svg class="icon-xs"><use href="#icon-sync"/></svg></button>
+        
+        <!-- Address Bar Input -->
+        <div class="inapp-address-bar" style="flex: 1; display: flex; align-items: center; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 4px 10px; gap: 8px;">
+          <span style="font-size: 0.8rem; opacity: 0.6;">🔒</span>
+          <input type="text" id="inapp-url-input" value="https://cloud.samsara.com/signin" placeholder="Enter URL (e.g. https://cloud.samsara.com/signin)" style="flex: 1; background: transparent; border: none; outline: none; color: #ecf0f1; font-size: 0.85rem; font-family: monospace;" />
+          <button id="btn-browser-go" class="violation-btn-sm" style="height: 24px; padding: 0 10px; border-radius: 5px; background: var(--accent); color: white; border: none; font-size: 0.7rem; font-weight: 700; cursor: pointer;">Go</button>
+          <button id="btn-browser-popup" class="violation-btn-sm" style="height: 24px; padding: 0 8px; border-radius: 5px; background: rgba(255, 255, 255, 0.1); color: #ecf0f1; border: 1px solid rgba(255, 255, 255, 0.15); font-size: 0.7rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px;" title="Open in dedicated window (recommended for PC testing)">
+            <span>↗ Open Window</span>
+          </button>
         </div>
-        <button id="btn-close-samsara-modal" class="icon-btn-sm" style="margin: 0;"><svg class="icon-xs"><use href="#icon-close"/></svg></button>
+
+        <!-- Connection Badge -->
+        <div id="inapp-browser-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.6); font-size: 0.7rem; padding: 4px 10px;">
+          <div class="status-dot"></div>
+          <span id="inapp-status-text">Disconnected</span>
+        </div>
+
+        <!-- Toggle Overlay HUD Button -->
+        <button id="btn-toggle-overlay-hud" class="icon-btn-sm" title="Toggle Live Overlay HUD" style="margin: 0; background: rgba(46, 204, 113, 0.15); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.3);">
+          <span>📌</span>
+        </button>
+
+        <!-- Close / Minimize Modal Button -->
+        <button id="btn-close-inapp-browser" class="icon-btn-sm" style="margin:0;"><svg class="icon-xs"><use href="#icon-close"/></svg></button>
       </header>
-      <div style="margin-bottom: 1.2rem; padding: 1rem; background: rgba(46, 204, 113, 0.08); border: 1px solid rgba(46, 204, 113, 0.2); border-radius: 10px;">
-        <p style="margin: 0; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">A Samsara login page will open. Sign in with your credentials, and you'll be automatically connected when done.</p>
+
+      <!-- Main Browser Viewport Frame -->
+      <div id="inapp-browser-viewport" style="flex: 1; width: 100%; height: 100%; position: relative; background: #0a0e14; overflow: hidden;">
+        <iframe id="inapp-webview-frame" src="about:blank" style="width: 100%; height: 100%; border: none; background: #ffffff;" allow="geolocation; camera; microphone"></iframe>
+        
+        <!-- Live Floating Telemetry HUD Overlay -->
+        <div id="live-telemetry-hud" class="floating-hud-overlay" style="position: absolute; bottom: 20px; left: 20px; right: 20px; max-width: 480px; margin: 0 auto; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 14px; backdrop-filter: blur(24px); box-shadow: 0 16px 40px rgba(0,0,0,0.6); padding: 14px 18px; z-index: 50; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
+          
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="live-pulse-dot" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e74c3c; animation: pulseRed 1.5s infinite;"></span>
+              <span style="font-size: 0.75rem; font-weight: 800; letter-spacing: 0.5px; color: #ecf0f1; text-transform: uppercase;">Live Telemetry Overlay</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span id="hud-active-buses-badge" class="status-badge" style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; font-size: 0.65rem; padding: 2px 8px;">0 Buses Active</span>
+              <button id="btn-hud-collapse" class="icon-btn-sm" style="width: 20px; height: 20px; padding: 0; opacity: 0.7;">—</button>
+            </div>
+          </div>
+
+          <div id="hud-content-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px;">
+            <div style="background: rgba(0,0,0,0.35); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+              <div style="font-size: 0.65rem; color: var(--text-tertiary); text-transform: uppercase;">Closest Bus</div>
+              <div id="hud-closest-bus-val" style="font-size: 1rem; font-weight: 800; color: var(--accent); margin-top: 2px;">--</div>
+              <div id="hud-driver-val" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">No Driver</div>
+            </div>
+
+            <div style="background: rgba(0,0,0,0.35); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+              <div style="font-size: 0.65rem; color: var(--text-tertiary); text-transform: uppercase;">Next Stop Prediction</div>
+              <div id="hud-next-stop-val" style="font-size: 0.95rem; font-weight: 700; color: #2ecc71; margin-top: 2px;">Stop --</div>
+              <div id="hud-distance-val" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 1px;">-- meters away</div>
+            </div>
+          </div>
+
+          <!-- Bottom Actions inside HUD -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08);">
+            <div style="font-size: 0.65rem; color: var(--text-tertiary);" id="hud-last-sync-time">Last update: Live</div>
+            <div style="display: flex; gap: 6px;">
+              <button id="btn-hud-sync-now" class="violation-btn-sm" style="height: 22px; padding: 0 8px; font-size: 0.65rem; background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer;">🔄 Sync</button>
+              <button id="btn-hud-open-map" class="violation-btn-sm" style="height: 22px; padding: 0 8px; font-size: 0.65rem; background: var(--accent); color: white; border: none; border-radius: 4px; font-weight: 700; cursor: pointer;">🗺️ View Map</button>
+            </div>
+          </div>
+
+        </div>
+
       </div>
-      <div id="samsara-login-error" style="display: none; color: #e74c3c; font-size: 0.8rem; margin-bottom: 1rem; padding: 8px 12px; background: rgba(231, 76, 60, 0.15); border-radius: 8px; border: 1px solid rgba(231, 76, 60, 0.3);"></div>
-      <div id="samsara-auth-status" style="display: none; color: #f39c12; font-size: 0.8rem; margin-bottom: 1rem; padding: 8px 12px; background: rgba(243, 156, 18, 0.15); border-radius: 8px; border: 1px solid rgba(243, 156, 18, 0.3);">Waiting for login...</div>
-      <div class="modal-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem;">
-        <button id="btn-cancel-samsara-login" class="btn-secondary" style="justify-content: center;">Cancel</button>
-        <button id="btn-submit-samsara-login" class="btn-primary" style="justify-content: center;">🔗 Open Samsara Login</button>
-      </div>
+
     </div>
   </div>
 

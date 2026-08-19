@@ -410,9 +410,7 @@ async function runFleetScan() {
         return DispatchEngine.getEnrichedStatus(bus, bus.name, portalData);
      });
      
-     statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
-     statusBadge.style.color = '#2ecc71';
-     statusBadge.innerHTML = `<div class="status-dot" style="background:#2ecc71;"></div><span>Fleet Scan Active</span>`;
+     updateSamsaraStatusUI(true, 'Fleet Scan Active');
      
      document.getElementById('tracker-last-stop').parentElement.querySelector('.stat-label').textContent = 'TOTAL SCANNED';
      document.getElementById('tracker-next-stop').parentElement.querySelector('.stat-label').textContent = 'ACTIVE BUSES';
@@ -530,116 +528,236 @@ document.getElementById('btn-mini-dispatch').addEventListener('click', () => {
 
 const COUNTIF_PROXY_URL = 'https://topviewloggerr.onrender.com';
 
-function openSamsaraConnectionModal() {
-  const modal = document.getElementById('samsara-connection-modal');
-  if (modal) modal.classList.add('active');
-  const errEl = document.getElementById('samsara-login-error');
-  if (errEl) errEl.style.display = 'none';
+// ============================================================
+// IN-APP BROWSER & LIVE TELEMETRY OVERLAY
+// ============================================================
+
+function normalizeUrl(input) {
+  let url = (input || '').trim();
+  if (!url) url = 'https://cloud.samsara.com/signin';
+  if (!/^https?:\/\//i.test(url)) {
+    url = 'https://' + url;
+  }
+  return url;
 }
 
-function closeSamsaraConnectionModal() {
-  const modal = document.getElementById('samsara-connection-modal');
+function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin') {
+  const modal = document.getElementById('inapp-browser-modal');
+  const urlInput = document.getElementById('inapp-url-input');
+  const iframe = document.getElementById('inapp-webview-frame');
+  const statusBadge = document.getElementById('inapp-browser-status');
+  const statusText = document.getElementById('inapp-status-text');
+
+  if (modal) modal.classList.add('active');
+  const targetUrl = normalizeUrl(initialUrl);
+  if (urlInput) urlInput.value = targetUrl;
+
+  if (iframe) {
+    iframe.src = targetUrl;
+  }
+
+  if (SamsaraEngine.hasActiveSession()) {
+    if (statusBadge) {
+      statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+      statusBadge.style.color = '#2ecc71';
+    }
+    if (statusText) statusText.textContent = 'Connected';
+  } else {
+    if (statusBadge) {
+      statusBadge.style.background = 'rgba(255,255,255,0.05)';
+      statusBadge.style.color = 'rgba(255,255,255,0.6)';
+    }
+    if (statusText) statusText.textContent = 'Waiting for Login...';
+  }
+
+  startTelemetryOverlayUpdates();
+}
+
+function closeInAppBrowser() {
+  const modal = document.getElementById('inapp-browser-modal');
   if (modal) modal.classList.remove('active');
 }
 
+// Backward compatibility alias for any existing triggers
+function openSamsaraConnectionModal() {
+  openInAppBrowser('https://cloud.samsara.com/signin');
+}
 
+function closeSamsaraConnectionModal() {
+  closeInAppBrowser();
+}
+
+function updateLiveTelemetryHUD(buses = []) {
+  const badge = document.getElementById('hud-active-buses-badge');
+  const closestBusVal = document.getElementById('hud-closest-bus-val');
+  const driverVal = document.getElementById('hud-driver-val');
+  const nextStopVal = document.getElementById('hud-next-stop-val');
+  const distanceVal = document.getElementById('hud-distance-val');
+  const syncTime = document.getElementById('hud-last-sync-time');
+
+  if (badge) badge.textContent = `${buses.length} Buses Active`;
+
+  if (buses.length > 0) {
+    const closest = buses[0];
+    const enriched = DispatchEngine.getEnrichedStatus(closest, closest.name, portalData);
+
+    if (closestBusVal) closestBusVal.textContent = `Bus ${closest.name || closest.id}`;
+    if (driverVal) driverVal.textContent = enriched.operator || 'Assigned Driver';
+
+    if (closest.latitude && closest.longitude) {
+      const stops = SamsaraEngine.CONFIG.STOPS;
+      const context = SamsaraEngine.resolveRouteContext(closest, stops);
+      if (context && context.upcoming) {
+        if (nextStopVal) nextStopVal.textContent = context.upcoming.name;
+        if (distanceVal) distanceVal.textContent = `${Math.round(context.upcoming.distanceMeters || 0)}m away`;
+      } else {
+        if (nextStopVal) nextStopVal.textContent = closest.address || 'In Transit';
+        if (distanceVal) distanceVal.textContent = `${Math.round(closest.speed || 0)} mph`;
+      }
+    }
+  } else {
+    if (closestBusVal) closestBusVal.textContent = '--';
+    if (driverVal) driverVal.textContent = 'No Active Fleet';
+    if (nextStopVal) nextStopVal.textContent = 'Scanning...';
+    if (distanceVal) distanceVal.textContent = 'Waiting for coordinates';
+  }
+
+  if (syncTime) {
+    const now = new Date();
+    syncTime.textContent = `Updated: ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+  }
+}
+
+function startTelemetryOverlayUpdates() {
+  SamsaraEngine.startLiveRecording((buses) => {
+    updateLiveTelemetryHUD(buses);
+    updateSamsaraStatusUI(true, 'Live Overlay Active');
+  }, 5000);
+}
+
+function updateSamsaraStatusUI(isConnected, text = 'Samsara Connected') {
+  const statusBadge = document.getElementById('tracker-api-status');
+  const btnLogout = document.getElementById('btn-samsara-logout');
+
+  if (isConnected) {
+    if (statusBadge) {
+      statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+      statusBadge.style.color = '#2ecc71';
+      statusBadge.innerHTML = `<div class="status-dot" style="background:#2ecc71;"></div><span>${text}</span>`;
+    }
+    if (btnLogout) btnLogout.style.display = 'inline-flex';
+  } else {
+    if (statusBadge) {
+      statusBadge.style.background = 'rgba(255,255,255,0.05)';
+      statusBadge.style.color = 'rgba(255,255,255,0.4)';
+      statusBadge.innerHTML = `<div class="status-dot"></div><span>${text}</span>`;
+    }
+    if (btnLogout) btnLogout.style.display = 'none';
+  }
+}
 
 setTimeout(() => {
-  const btnCloseLogin = document.getElementById('btn-close-samsara-modal');
-  const btnCancelLogin = document.getElementById('btn-cancel-samsara-login');
-  const btnSubmitLogin = document.getElementById('btn-submit-samsara-login');
+  const btnCloseBrowser = document.getElementById('btn-close-inapp-browser');
+  const btnBrowserGo = document.getElementById('btn-browser-go');
+  const btnBrowserPopup = document.getElementById('btn-browser-popup');
+  const inappUrlInput = document.getElementById('inapp-url-input');
+  const btnBrowserBack = document.getElementById('btn-browser-back');
+  const btnBrowserForward = document.getElementById('btn-browser-forward');
+  const btnBrowserReload = document.getElementById('btn-browser-reload');
+  const btnToggleHud = document.getElementById('btn-toggle-overlay-hud');
+  const btnHudCollapse = document.getElementById('btn-hud-collapse');
+  const btnHudSyncNow = document.getElementById('btn-hud-sync-now');
+  const btnHudOpenMap = document.getElementById('btn-hud-open-map');
+  const iframe = document.getElementById('inapp-webview-frame');
+  const hudOverlay = document.getElementById('live-telemetry-hud');
+  const btnSamsaraLogout = document.getElementById('btn-samsara-logout');
 
-  if (btnCloseLogin) btnCloseLogin.addEventListener('click', closeSamsaraConnectionModal);
-  if (btnCancelLogin) btnCancelLogin.addEventListener('click', closeSamsaraConnectionModal);
+  if (btnCloseBrowser) btnCloseBrowser.addEventListener('click', closeInAppBrowser);
 
-  if (btnSubmitLogin) {
-    btnSubmitLogin.addEventListener('click', async () => {
-      const errEl = document.getElementById('samsara-login-error');
-      const statusEl = document.getElementById('samsara-auth-status');
-      if (errEl) errEl.style.display = 'none';
+  if (btnBrowserPopup) {
+    btnBrowserPopup.addEventListener('click', () => {
+      const url = normalizeUrl(inappUrlInput ? inappUrlInput.value : 'https://cloud.samsara.com/signin');
+      window.open(url, 'samsara-pc-window', 'width=1150,height=850,scrollbars=yes,resizable=yes');
+    });
+  }
 
-      const orgText = btnSubmitLogin.innerHTML;
-      btnSubmitLogin.innerHTML = '⏳ Opening...';
-      btnSubmitLogin.disabled = true;
+  const navigateToEnteredUrl = () => {
+    if (inappUrlInput && iframe) {
+      const url = normalizeUrl(inappUrlInput.value);
+      inappUrlInput.value = url;
+      iframe.src = url;
+    }
+  };
 
+  if (btnBrowserGo) btnBrowserGo.addEventListener('click', navigateToEnteredUrl);
+  if (inappUrlInput) {
+    inappUrlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') navigateToEnteredUrl();
+    });
+  }
+
+  if (btnBrowserReload && iframe) {
+    btnBrowserReload.addEventListener('click', () => {
+      iframe.src = iframe.src;
+    });
+  }
+
+  if (btnBrowserBack && iframe) {
+    btnBrowserBack.addEventListener('click', () => {
+      try { iframe.contentWindow?.history.back(); } catch(e) {}
+    });
+  }
+
+  if (btnBrowserForward && iframe) {
+    btnBrowserForward.addEventListener('click', () => {
+      try { iframe.contentWindow?.history.forward(); } catch(e) {}
+    });
+  }
+
+  if (btnToggleHud && hudOverlay) {
+    btnToggleHud.addEventListener('click', () => {
+      const isHidden = hudOverlay.style.display === 'none';
+      hudOverlay.style.display = isHidden ? 'block' : 'none';
+      btnToggleHud.style.background = isHidden ? 'rgba(46, 204, 113, 0.15)' : 'rgba(255,255,255,0.05)';
+      btnToggleHud.style.color = isHidden ? '#2ecc71' : 'rgba(255,255,255,0.5)';
+    });
+  }
+
+  if (btnHudCollapse && hudOverlay) {
+    btnHudCollapse.addEventListener('click', () => {
+      hudOverlay.classList.toggle('collapsed');
+      btnHudCollapse.textContent = hudOverlay.classList.contains('collapsed') ? '+' : '—';
+    });
+  }
+
+  if (btnHudSyncNow) {
+    btnHudSyncNow.addEventListener('click', async () => {
+      btnHudSyncNow.innerHTML = '⏳';
       try {
-        // Step 1: Tell the server to activate the Samsara proxy
-        const startRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/auth-start`, 'GET');
-        if (!startRes.success) throw new Error('Failed to start auth flow');
+        const buses = await SamsaraEngine.findBusesNearStop(0, 0, 500);
+        updateLiveTelemetryHUD(buses);
+      } catch(e) {}
+      btnHudSyncNow.innerHTML = '🔄 Sync';
+    });
+  }
 
-        // Step 2: Open the Samsara login page in a popup (routed through our proxy)
-        const loginUrl = `${SamsaraEngine.PROXY_BASE}/signin`;
-        const popup = window.open(loginUrl, 'samsara-login', 'width=520,height=700,scrollbars=yes');
+  if (btnHudOpenMap) {
+    btnHudOpenMap.addEventListener('click', () => {
+      closeInAppBrowser();
+      runFleetScan();
+    });
+  }
 
-        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '⏳ Waiting for you to log in...'; }
-        btnSubmitLogin.innerHTML = '⏳ Waiting for login...';
-
-        // Step 3: Listen for success message from popup OR poll status
-        let authDone = false;
-
-        const onMessage = (event) => {
-          if (event.data?.type === 'samsara-auth-success') {
-            authDone = true;
-            window.removeEventListener('message', onMessage);
-          }
-        };
-        window.addEventListener('message', onMessage);
-
-        // Poll every 2 seconds for up to 3 minutes
-        for (let i = 0; i < 90 && !authDone; i++) {
-          await new Promise(r => setTimeout(r, 2000));
-
-          // Check if popup was closed without completing
-          if (popup && popup.closed && !authDone) {
-            try {
-              const statusRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/status`, 'GET');
-              if (statusRes.connected || statusRes.cookies) {
-                authDone = true;
-                if (statusRes.cookies) localStorage.setItem('samsara_session_cookies', statusRes.cookies);
-                if (statusRes.csrfToken) localStorage.setItem('samsara_csrf_token', statusRes.csrfToken);
-              }
-            } catch (e) {}
-            if (!authDone) {
-              if (statusEl) statusEl.style.display = 'none';
-              if (errEl) { errEl.textContent = 'Login window was closed. Try again.'; errEl.style.display = 'block'; }
-              break;
-            }
-          }
-
-          // Poll server for auth status
-          try {
-            const statusRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/status`, 'GET');
-            if (statusRes.connected || statusRes.cookies) {
-              authDone = true;
-              if (statusRes.cookies) localStorage.setItem('samsara_session_cookies', statusRes.cookies);
-              if (statusRes.csrfToken) localStorage.setItem('samsara_csrf_token', statusRes.csrfToken);
-            }
-          } catch (e) {}
-        }
-
-        window.removeEventListener('message', onMessage);
-
-        if (authDone) {
-          if (statusEl) statusEl.style.display = 'none';
-          closeSamsaraConnectionModal();
-          const statusBadge = document.getElementById('tracker-api-status');
-          if (statusBadge) {
-            statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
-            statusBadge.style.color = '#2ecc71';
-            statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
-          }
-        } else if (!popup || !popup.closed) {
-          if (statusEl) statusEl.style.display = 'none';
-          if (errEl) { errEl.textContent = 'Login timed out. Please try again.'; errEl.style.display = 'block'; }
-        }
-
+  if (btnSamsaraLogout) {
+    btnSamsaraLogout.addEventListener('click', async () => {
+      try {
+        await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/auth-reset`, 'POST');
       } catch (e) {
-        if (errEl) { errEl.textContent = e.message || 'Failed to open login'; errEl.style.display = 'block'; }
-        if (statusEl) statusEl.style.display = 'none';
-      } finally {
-        btnSubmitLogin.innerHTML = orgText;
-        btnSubmitLogin.disabled = false;
+        console.warn('Samsara reset endpoint error:', e.message);
       }
+      SamsaraEngine.clearSession();
+      SamsaraEngine.stopLiveRecording();
+      updateSamsaraStatusUI(false, 'Disconnected');
     });
   }
 
@@ -750,10 +868,8 @@ async function refreshAllLoginsOnEntry(isSilent = true) {
   const storedCsrf = typeof localStorage !== 'undefined' ? localStorage.getItem('samsara_csrf_token') : null;
 
   // Immediately show local cached status if cookies exist so UI is responsive
-  if (storedSamsaraCookies && statusBadge) {
-    statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
-    statusBadge.style.color = '#2ecc71';
-    statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
+  if (storedSamsaraCookies) {
+    updateSamsaraStatusUI(true, 'Samsara Connected');
   }
 
   try {
@@ -761,36 +877,22 @@ async function refreshAllLoginsOnEntry(isSilent = true) {
     if (statusRes.connected || statusRes.cookies) {
       if (statusRes.cookies) localStorage.setItem('samsara_session_cookies', statusRes.cookies);
       if (statusRes.csrfToken) localStorage.setItem('samsara_csrf_token', statusRes.csrfToken);
-      if (statusBadge) {
-        statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
-        statusBadge.style.color = '#2ecc71';
-        statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
-      }
+      updateSamsaraStatusUI(true, 'Samsara Connected');
     } else if (storedSamsaraCookies) {
       // Server proxy might have restarted; check if local session cookies are still valid
       try {
         const testRes = await SamsaraEngine.findBusesNearStop(0, 0, 10);
         if (testRes && Array.isArray(testRes)) {
-          if (statusBadge) {
-            statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
-            statusBadge.style.color = '#2ecc71';
-            statusBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71;"></div><span>Samsara Connected</span>';
-          }
+          updateSamsaraStatusUI(true, 'Samsara Connected');
         }
       } catch (err) {
         if (err.message && err.message.toLowerCase().includes('expired')) {
           localStorage.removeItem('samsara_session_cookies');
-          if (statusBadge) {
-            statusBadge.style.background = 'rgba(231, 76, 60, 0.2)';
-            statusBadge.style.color = '#e74c3c';
-            statusBadge.innerHTML = '<div class="status-dot" style="background:#e74c3c;"></div><span>Session Expired</span>';
-          }
+          updateSamsaraStatusUI(false, 'Session Expired');
         }
       }
-    } else if (statusBadge && !storedSamsaraCookies) {
-      statusBadge.style.background = 'rgba(255,255,255,0.05)';
-      statusBadge.style.color = 'rgba(255,255,255,0.4)';
-      statusBadge.innerHTML = '<div class="status-dot"></div><span>Disconnected</span>';
+    } else if (!storedSamsaraCookies) {
+      updateSamsaraStatusUI(false, 'Disconnected');
     }
   } catch (e) {
     if (!isSilent) console.warn("[AuthRefresh] Could not reach server proxy for Samsara check:", e.message);

@@ -53,6 +53,61 @@ class SamsaraEngine {
     return (typeof window !== 'undefined' && window.USE_LOCAL_PROXY) ? 'http://localhost:3001' : 'https://topviewloggerr.onrender.com';
   }
 
+  static _recordingTimer = null;
+  static _lastRecordedFleet = [];
+
+  static setSession(cookies, csrfToken = null) {
+    if (typeof localStorage !== 'undefined') {
+      if (cookies) localStorage.setItem('samsara_session_cookies', cookies);
+      if (csrfToken) localStorage.setItem('samsara_csrf_token', csrfToken);
+    }
+  }
+
+  static clearSession() {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('samsara_session_cookies');
+      localStorage.removeItem('samsara_csrf_token');
+    }
+  }
+
+  static hasActiveSession() {
+    if (typeof localStorage === 'undefined') return false;
+    return Boolean(localStorage.getItem('samsara_session_cookies'));
+  }
+
+  /**
+   * Starts a continuous live telemetry recording loop that periodically polls Samsara
+   * and pushes updated fleet data to the live HUD overlay.
+   */
+  static startLiveRecording(onUpdate, intervalMs = 6000) {
+    this.stopLiveRecording();
+    console.log('[SamsaraEngine] Starting live telemetry recording stream...');
+
+    const runCycle = async () => {
+      try {
+        const buses = await this.findBusesNearStop(0, 0, 500);
+        this._lastRecordedFleet = buses;
+        if (typeof onUpdate === 'function') {
+          onUpdate(buses);
+        }
+      } catch (err) {
+        console.warn('[SamsaraEngine] Live recording poll warning:', err.message);
+      }
+    };
+
+    // Run immediately then on interval
+    runCycle();
+    this._recordingTimer = setInterval(runCycle, intervalMs);
+  }
+
+  static stopLiveRecording() {
+    if (this._recordingTimer) {
+      clearInterval(this._recordingTimer);
+      this._recordingTimer = null;
+      console.log('[SamsaraEngine] Live recording stream stopped.');
+    }
+  }
+
   static async proxyRequest(endpoint, body = {}) {
     const cookies = typeof localStorage !== 'undefined' ? localStorage.getItem('samsara_session_cookies') : null;
     const csrfToken = typeof localStorage !== 'undefined' ? localStorage.getItem('samsara_csrf_token') : null;

@@ -15,6 +15,7 @@
 import express from 'express';
 import cors from 'cors';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import zlib from 'zlib';
 
 let samsaraSessionCookies = null;
 let samsaraCsrfToken = null;
@@ -513,8 +514,14 @@ function captureCookies(proxyRes) {
     const rewritten = setCookieHeaders.map(cookie => {
       const nameMatch = cookie.match(/^([^=]+)=([^;]*)/);
       if (nameMatch) {
-        samsaraCapturedCookies[nameMatch[1].trim()] = nameMatch[1].trim() + '=' + nameMatch[2];
-        console.log('[SamsaraAuth] Captured cookie:', nameMatch[1].trim());
+        const key = nameMatch[1].trim();
+        const val = nameMatch[2];
+        samsaraCapturedCookies[key] = key + '=' + val;
+        console.log('[SamsaraAuth] Captured cookie:', key);
+        if (/csrf|xsrf/i.test(key)) {
+          samsaraCsrfToken = val;
+          console.log('[SamsaraAuth] Captured CSRF from cookie:', key, '=', val);
+        }
       }
       return cookie
         .replace(/;\s*Secure/gi, '')
@@ -530,9 +537,12 @@ function rewriteLocationHeader(proxyRes) {
   const location = proxyRes.headers['location'];
   if (!location) return;
 
-  // Post-login redirect → success page
-  if (/\/o\/|\/fleet|\/dashboard|\/d\//i.test(location)) {
-    console.log('[SamsaraAuth] Login redirect detected:', location);
+  // Distinguish intermediate login/auth steps from actual post-login destinations
+  const isIntermediateAuth = /\/(signin|login|saml|auth|select_org|choose_org|oci_oidc)\b/i.test(location);
+  const isPostLogin = /\/(fleet|dashboard|d\/|organizations\/list)\b/i.test(location) || (/\/o\/\d+/i.test(location) && !isIntermediateAuth);
+
+  if (isPostLogin && !isIntermediateAuth) {
+    console.log('[SamsaraAuth] Login completion redirect detected:', location);
     proxyRes.headers['location'] = '/samsara-auth-success';
     return;
   }
@@ -541,6 +551,9 @@ function rewriteLocationHeader(proxyRes) {
   let rewritten = location;
   rewritten = rewritten.replace(/https?:\/\/cloud\.samsara\.com/gi, '');
   rewritten = rewritten.replace(/https?:\/\/[a-z0-9-]+\.cloud\.samsara\.com/gi, '');
+  if (rewritten.includes('origin=')) {
+    rewritten = rewritten.replace(/origin=https?(%3A%2F%2F|:\/\/)[^&]+/gi, 'origin=https%3A%2F%2Fcloud.samsara.com');
+  }
   if (rewritten !== location) {
     console.log('[SamsaraAuth] Rewrote redirect:', location, '->', rewritten);
     proxyRes.headers['location'] = rewritten;
@@ -561,24 +574,60 @@ function forwardCookies(proxyReq, req) {
 // Helper: rewrite HTML content to route Samsara URLs through our proxy
 function rewriteSamsaraHtml(html) {
   let result = html;
+
+  // Inject client-side fetch/XHR patch for origin param
+  const originPatch = `<script>
+(function(){
+  function fixUrl(u){
+    if(typeof u==='string' && u.includes('origin=')){
+      return u.replace(/origin=https?(%3A%2F%2F|:\\\/\\\/)[^&]+/gi, 'origin=https%3A%2F%2Fcloud.samsara.com');
+    }
+    return u;
+  }
+  const of=window.fetch;
+  if(of){
+    window.fetch=function(i,n){
+      if(typeof i==='string') i=fixUrl(i);
+      else if(i && i.url){ try{ i=new Request(fixUrl(i.url), i); }catch(e){} }
+      return of.call(this,i,n);
+    };
+  }
+  const ox=XMLHttpRequest.prototype.open;
+  if(ox){
+    XMLHttpRequest.prototype.open=function(m,u){
+      if(typeof u==='string') u=fixUrl(u);
+      return ox.apply(this,arguments);
+    };
+  }
+})();
+</script>`;
+
+  if (result.includes('<head>')) {
+    result = result.replace('<head>', '<head>' + originPatch);
+  }
+
+  // Rewrite static asset subdomains
+  result = result.replace(/https?:\/\/static\.cloud\.samsara\.com/gi, '/static-proxy');
+  result = result.replace(/https?:\/\/static\.samsara\.com/gi, '/static-proxy');
+  // Rewrite regional/WS/GraphQL subdomains (*.cloud.samsara.com except static) → /ws-proxy/
+  result = result.replace(/https?:\/\/([a-z0-9-]+)\.cloud\.samsara\.com/gi, (match, sub) => {
+    if (sub === 'static') return '/static-proxy';
+    return `/ws-proxy/${sub}`;
+  });
   // Rewrite absolute URLs to cloud.samsara.com → relative (stays in our proxy)
   result = result.replace(/https?:\/\/cloud\.samsara\.com/gi, '');
-  // Rewrite WebSocket/GraphQL subdomain URLs → /ws-proxy/
-  result = result.replace(/https?:\/\/([a-z0-9-]+)\.cloud\.samsara\.com/gi, '/ws-proxy/$1');
-  // Rewrite static.samsara.com → /static-proxy/
-  result = result.replace(/https?:\/\/static\.samsara\.com/gi, '/static-proxy');
   return result;
 }
 
-// ── Subdomain proxy: static.samsara.com ──
+// ── Subdomain proxy: static.cloud.samsara.com ──
 const staticSamsaraProxy = createProxyMiddleware({
-  target: 'https://static.samsara.com',
+  target: 'https://static.cloud.samsara.com',
   changeOrigin: true,
   secure: true,
   pathRewrite: { '^/static-proxy': '' },
   on: {
     proxyReq: (proxyReq) => {
-      proxyReq.setHeader('Host', 'static.samsara.com');
+      proxyReq.setHeader('Host', 'static.cloud.samsara.com');
     },
     proxyRes: (proxyRes) => {
       stripSecurityHeaders(proxyRes);
@@ -613,8 +662,11 @@ app.use('/ws-proxy', (req, res, next) => {
         proxyReq.setHeader('Host', `${subdomain}.cloud.samsara.com`);
         proxyReq.setHeader('Origin', 'https://cloud.samsara.com');
         proxyReq.setHeader('Referer', 'https://cloud.samsara.com/');
+        if (proxyReq.path && proxyReq.path.includes('origin=')) {
+          proxyReq.path = proxyReq.path.replace(/origin=https?(%3A%2F%2F|:\/\/)[^&]+/gi, 'origin=https%3A%2F%2Fcloud.samsara.com');
+        }
         forwardCookies(proxyReq, req);
-        const csrf = req.headers['x-csrf-token'];
+        const csrf = req.headers['x-csrf-token'] || req.headers['csrf-token'];
         if (csrf) {
           samsaraCsrfToken = csrf;
           console.log('[SamsaraAuth] Captured CSRF from ws-proxy:', csrf);
@@ -629,20 +681,28 @@ app.use('/ws-proxy', (req, res, next) => {
   return wsProxy(req, res, next);
 });
 
-// ── Main Samsara proxy (cloud.samsara.com) with HTML rewriting ──
+// ── Main Samsara proxy (cloud.samsara.com) with HTML rewriting & decompression ──
 const samsaraProxy = createProxyMiddleware({
   target: 'https://cloud.samsara.com',
   changeOrigin: true,
   secure: true,
   ws: true,
-  selfHandleResponse: true, // We intercept responses to rewrite HTML
+  selfHandleResponse: true, // We intercept responses to rewrite HTML/JS
   on: {
     proxyReq: (proxyReq, req) => {
       proxyReq.setHeader('Host', 'cloud.samsara.com');
       proxyReq.setHeader('Origin', 'https://cloud.samsara.com');
       proxyReq.setHeader('Referer', 'https://cloud.samsara.com/');
+      proxyReq.setHeader('Accept-Encoding', 'identity'); // Request uncompressed output where possible
+
+      if (proxyReq.path && proxyReq.path.includes('origin=')) {
+        const oldPath = proxyReq.path;
+        proxyReq.path = proxyReq.path.replace(/origin=https?(%3A%2F%2F|:\/\/)[^&]+/gi, 'origin=https%3A%2F%2Fcloud.samsara.com');
+        console.log('[SamsaraAuth] Rewrote origin query param in path:', oldPath, '->', proxyReq.path);
+      }
+
       forwardCookies(proxyReq, req);
-      const csrf = req.headers['x-csrf-token'];
+      const csrf = req.headers['x-csrf-token'] || req.headers['csrf-token'];
       if (csrf) {
         samsaraCsrfToken = csrf;
         console.log('[SamsaraAuth] Captured CSRF token:', csrf);
@@ -657,22 +717,30 @@ const samsaraProxy = createProxyMiddleware({
       const isHtmlOrJs = contentType.includes('text/html') || contentType.includes('javascript');
 
       if (isHtmlOrJs) {
-        // Collect the response body, rewrite URLs, then send
+        const encoding = (proxyRes.headers['content-encoding'] || '').toLowerCase();
         const chunks = [];
         proxyRes.on('data', chunk => chunks.push(chunk));
         proxyRes.on('end', () => {
-          let body = Buffer.concat(chunks).toString('utf8');
+          let rawBuffer = Buffer.concat(chunks);
+          if (encoding.includes('gzip')) {
+            try { rawBuffer = zlib.gunzipSync(rawBuffer); } catch(e) { console.error('[SamsaraAuth] Gunzip failed:', e.message); }
+          } else if (encoding.includes('deflate')) {
+            try { rawBuffer = zlib.inflateSync(rawBuffer); } catch(e) { console.error('[SamsaraAuth] Inflate failed:', e.message); }
+          } else if (encoding.includes('br')) {
+            try { rawBuffer = zlib.brotliDecompressSync(rawBuffer); } catch(e) { console.error('[SamsaraAuth] Brotli decompress failed:', e.message); }
+          }
+
+          let body = rawBuffer.toString('utf8');
           body = rewriteSamsaraHtml(body);
 
-          // Copy headers (except content-length since we modified the body)
           const headers = { ...proxyRes.headers };
           delete headers['content-length'];
-          delete headers['content-encoding']; // We decoded it, don't claim gzip
+          delete headers['content-encoding'];
           res.writeHead(proxyRes.statusCode, headers);
           res.end(body);
         });
       } else {
-        // Non-HTML: pass through as-is (images, fonts, JSON, etc.)
+        // Non-HTML/JS: pass through as-is (images, fonts, JSON, etc.)
         const headers = { ...proxyRes.headers };
         res.writeHead(proxyRes.statusCode, headers);
         proxyRes.pipe(res);
@@ -681,10 +749,16 @@ const samsaraProxy = createProxyMiddleware({
   }
 });
 
-// Catch-all: proxy non-API requests to Samsara ONLY when auth is active
+// Internal server endpoints that must NOT be passed to Samsara proxy
+const INTERNAL_API_PREFIXES = ['/api/samsara/', '/api/countif/', '/api/health', '/samsara-auth-success', '/static-proxy', '/ws-proxy'];
+
+// Catch-all: proxy requests to Samsara when auth is active (excluding our internal endpoints)
 app.use((req, res, next) => {
-  if (samsaraAuthActive && !req.originalUrl.startsWith('/api/')) {
-    return samsaraProxy(req, res, next);
+  if (samsaraAuthActive) {
+    const isInternal = INTERNAL_API_PREFIXES.some(prefix => req.originalUrl.startsWith(prefix));
+    if (!isInternal) {
+      return samsaraProxy(req, res, next);
+    }
   }
   next();
 });
