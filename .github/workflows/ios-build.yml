@@ -2,7 +2,7 @@ name: Aug 12 Fixes - iOS
 
 on:
   push:
-    branches: [ main, build-apk ]
+    branches: [ main, build-apk, newmapiostest ]
   workflow_dispatch:
 
 jobs:

@@ -2,7 +2,7 @@ name: Aug 12 Fixes - Android
 
 on:
   push:
-    branches: [ build-apk, main ]
+    branches: [ build-apk, main, newmapiostest ]
   workflow_dispatch:
 
 permissions:
