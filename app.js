@@ -548,19 +548,6 @@ function normalizeUrl(input) {
 async function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin') {
   let targetUrl = normalizeUrl(initialUrl);
 
-  // If the target is Samsara login, route through our auth-start proxy to capture session cookies
-  if (targetUrl.includes('samsara.com') || targetUrl.includes('/signin') || targetUrl.includes('/login')) {
-    try {
-      const startRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/auth-start`, 'GET');
-      if (startRes && startRes.success) {
-        const path = startRes.loginUrl || '/signin';
-        targetUrl = `${SamsaraEngine.PROXY_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
-      }
-    } catch (err) {
-      console.warn('[InAppBrowser] Auth start proxy init fallback:', err.message);
-    }
-  }
-
   // Setup live polling while login browser is open
   let authPollTimer = null;
   const pollAuthStatus = async () => {
