@@ -543,14 +543,55 @@ function normalizeUrl(input) {
 }
 
 async function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin') {
-  const targetUrl = normalizeUrl(initialUrl);
+  let targetUrl = normalizeUrl(initialUrl);
 
-  // If running on native iOS/Android Capacitor app, use native in-app browser to avoid WebKit iframe white screens
+  // If the target is Samsara login, route through our auth-start proxy to capture session cookies
+  if (targetUrl.includes('samsara.com') || targetUrl.includes('/signin') || targetUrl.includes('/login')) {
+    try {
+      const startRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/auth-start`, 'GET');
+      if (startRes && startRes.success) {
+        const path = startRes.loginUrl || '/signin';
+        targetUrl = `${SamsaraEngine.PROXY_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
+      }
+    } catch (err) {
+      console.warn('[InAppBrowser] Auth start proxy init fallback:', err.message);
+    }
+  }
+
+  // Setup live polling while login browser is open
+  let authPollTimer = null;
+  const pollAuthStatus = async () => {
+    try {
+      const statusRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/status`, 'GET');
+      if (statusRes && (statusRes.connected || statusRes.cookies)) {
+        if (statusRes.cookies) localStorage.setItem('samsara_session_cookies', statusRes.cookies);
+        if (statusRes.csrfToken) localStorage.setItem('samsara_csrf_token', statusRes.csrfToken);
+        updateSamsaraStatusUI(true, 'Samsara Connected');
+        startTelemetryOverlayUpdates();
+        try { await Browser.close(); } catch(e) {}
+        closeInAppBrowser();
+        if (authPollTimer) clearInterval(authPollTimer);
+      }
+    } catch (e) {}
+  };
+
+  // Start polling every 2 seconds for up to 3 minutes
+  authPollTimer = setInterval(pollAuthStatus, 2000);
+  setTimeout(() => { if (authPollTimer) clearInterval(authPollTimer); }, 180000);
+
+  // If running on native iOS/Android Capacitor app, use native in-app browser
   if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       console.log('[InAppBrowser] Opening native iOS/Android browser for:', targetUrl);
+      
+      const listener = await Browser.addListener('browserFinished', async () => {
+        console.log('[InAppBrowser] Native browser closed. Checking auth status...');
+        await pollAuthStatus();
+        if (authPollTimer) clearInterval(authPollTimer);
+        listener.remove();
+      });
+
       await Browser.open({ url: targetUrl, windowName: '_blank' });
-      startTelemetryOverlayUpdates();
       return;
     } catch(e) {
       console.warn('[InAppBrowser] Native Browser.open fallback:', e.message);
