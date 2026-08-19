@@ -9,6 +9,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
 import DispatchEngine from './dispatch_engine.js';
 import SamsaraEngine from './samsara_engine.js';
+import { Browser } from '@capacitor/browser';
 
 console.log("App.js loading (ESM Mode)...");
 
@@ -541,7 +542,22 @@ function normalizeUrl(input) {
   return url;
 }
 
-function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin') {
+async function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin') {
+  const targetUrl = normalizeUrl(initialUrl);
+
+  // If running on native iOS/Android Capacitor app, use native in-app browser to avoid WebKit iframe white screens
+  if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform()) {
+    try {
+      console.log('[InAppBrowser] Opening native iOS/Android browser for:', targetUrl);
+      await Browser.open({ url: targetUrl, windowName: '_blank' });
+      startTelemetryOverlayUpdates();
+      return;
+    } catch(e) {
+      console.warn('[InAppBrowser] Native Browser.open fallback:', e.message);
+    }
+  }
+
+  // Web / Desktop Fallback: In-app modal with Address Bar
   const modal = document.getElementById('inapp-browser-modal');
   const urlInput = document.getElementById('inapp-url-input');
   const iframe = document.getElementById('inapp-webview-frame');
@@ -549,7 +565,6 @@ function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin') {
   const statusText = document.getElementById('inapp-status-text');
 
   if (modal) modal.classList.add('active');
-  const targetUrl = normalizeUrl(initialUrl);
   if (urlInput) urlInput.value = targetUrl;
 
   if (iframe) {
