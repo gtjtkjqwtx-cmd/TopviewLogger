@@ -359,10 +359,9 @@ const DEFAULTS = {
 let trackerMap = null;
 let trackerMarkers = [];
 
-// UI Reactive logic for Default API checkbox (Removed to match minimal UI)
-document.getElementById('btn-goto-tracker').addEventListener('click', () => { 
-  State.activeModule = 'tracker'; 
-  showView('tracker'); 
+function openTrackerMapAndScan() {
+  State.activeModule = 'tracker';
+  showView('tracker');
 
   // Initialize Map if not already done
   if (!trackerMap) {
@@ -377,13 +376,17 @@ document.getElementById('btn-goto-tracker').addEventListener('click', () => {
     loadRouteStops();
   }
   
-  // Necessary for Leaflet to recalculate its dimensions after being unhidden
+  // Recalculate dimensions after being unhidden and run fleet scan
   setTimeout(() => {
-    trackerMap.invalidateSize();
-    // AUTO-START SCAN: Pre-emptively load fleet positions
-    console.log("[Tracker] Auto-initiating fleet discovery...");
+    trackerMap?.invalidateSize();
+    console.log("[Tracker] Auto-initiating fleet discovery on map...");
     runFleetScan(); 
-  }, 50);
+  }, 100);
+}
+
+// UI Reactive logic for Default API checkbox (Removed to match minimal UI)
+document.getElementById('btn-goto-tracker').addEventListener('click', () => { 
+  openTrackerMapAndScan();
 });
 
 async function runFleetScan() {
@@ -568,9 +571,14 @@ async function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin')
         if (statusRes.csrfToken) localStorage.setItem('samsara_csrf_token', statusRes.csrfToken);
         updateSamsaraStatusUI(true, 'Samsara Connected');
         startTelemetryOverlayUpdates();
+        
+        // 1. Auto-close native browser sheet & in-app modal
         try { await Browser.close(); } catch(e) {}
         closeInAppBrowser();
         if (authPollTimer) clearInterval(authPollTimer);
+
+        // 2. Automatically navigate to live tracker map and render buses
+        openTrackerMapAndScan();
       }
     } catch (e) {}
   };
@@ -589,6 +597,10 @@ async function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin')
         await pollAuthStatus();
         if (authPollTimer) clearInterval(authPollTimer);
         listener.remove();
+        closeInAppBrowser();
+        if (SamsaraEngine.hasActiveSession()) {
+          openTrackerMapAndScan();
+        }
       });
 
       await Browser.open({ url: targetUrl, windowName: '_blank' });
