@@ -575,9 +575,16 @@ function forwardCookies(proxyReq, req) {
 function rewriteSamsaraHtml(html) {
   let result = html;
 
-  // Inject client-side fetch/XHR patch for origin param
+  // Inject client-side fetch/XHR patch for origin param and neutralize framebusting
   const originPatch = `<script>
 (function(){
+  try {
+    // Neutralize anti-iframe checks so the login screen stays rendered
+    Object.defineProperty(window, 'top', { get: function() { return window.self; } });
+    Object.defineProperty(window, 'parent', { get: function() { return window.self; } });
+    Object.defineProperty(window, 'frameElement', { get: function() { return null; } });
+  } catch(e) {}
+
   function fixUrl(u){
     if(typeof u==='string' && u.includes('origin=')){
       return u.replace(/origin=https?(%3A%2F%2F|:\\\/\\\/)[^&]+/gi, 'origin=https%3A%2F%2Fcloud.samsara.com');
