@@ -48,7 +48,7 @@
     .stop-tip { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #000; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; opacity: 0; pointer-events: none; transition: all 0.2s ease; white-space: nowrap; margin-bottom: 8px; border: 1px solid #2ecc71; box-shadow: 0 4px 15px rgba(0,0,0,0.8); z-index: 200; }
     .stop-marker-wrapper:hover .stop-tip { opacity: 1; transform: translateX(-50%) translateY(-5px); }
   </style>
-  <script type="module" crossorigin src="/assets/index-36O-8zPV.js"></script>
+  <script type="module" crossorigin src="/assets/index-ka6zlAjQ.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/dist-CGbJw_cl.js">
   <link rel="stylesheet" crossorigin href="/assets/index-YPq-danA.css">
 </head>
@@ -949,18 +949,18 @@
         
         <!-- Address Bar Input -->
         <div class="inapp-address-bar" style="flex: 1; display: flex; align-items: center; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 4px 10px; gap: 8px;">
-          <span style="font-size: 0.8rem; opacity: 0.6;">🔒</span>
-          <input type="text" id="inapp-url-input" value="https://cloud.samsara.com/signin" placeholder="Enter URL (e.g. https://cloud.samsara.com/signin)" style="flex: 1; background: transparent; border: none; outline: none; color: #ecf0f1; font-size: 0.85rem; font-family: monospace;" />
+          <span style="font-size: 0.8rem; opacity: 0.6;">🌐</span>
+          <input type="text" id="inapp-url-input" value="" placeholder="Enter any website URL (e.g. google.com, samsara.com)" style="flex: 1; background: transparent; border: none; outline: none; color: #ecf0f1; font-size: 0.85rem; font-family: monospace;" />
           <button id="btn-browser-go" class="violation-btn-sm" style="height: 24px; padding: 0 10px; border-radius: 5px; background: var(--accent); color: white; border: none; font-size: 0.7rem; font-weight: 700; cursor: pointer;">Go</button>
           <button id="btn-browser-popup" class="violation-btn-sm" style="height: 24px; padding: 0 8px; border-radius: 5px; background: rgba(255, 255, 255, 0.1); color: #ecf0f1; border: 1px solid rgba(255, 255, 255, 0.15); font-size: 0.7rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px;" title="Open in dedicated window (recommended for PC testing)">
             <span>↗ Open Window</span>
           </button>
         </div>
 
-        <!-- Connection Badge -->
+        <!-- Connection / Status Badge -->
         <div id="inapp-browser-status" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.6); font-size: 0.7rem; padding: 4px 10px;">
           <div class="status-dot"></div>
-          <span id="inapp-status-text">Disconnected</span>
+          <span id="inapp-status-text">Ready</span>
         </div>
 
         <!-- Toggle Overlay HUD Button -->
@@ -971,6 +971,15 @@
         <!-- Close / Minimize Modal Button -->
         <button id="btn-close-inapp-browser" class="icon-btn-sm" style="margin:0;"><svg class="icon-xs"><use href="#icon-close"/></svg></button>
       </header>
+
+      <!-- Quick Bookmarks Bar -->
+      <div id="inapp-quick-links" style="display: flex; align-items: center; gap: 8px; padding: 6px 14px; background: rgba(10, 15, 22, 0.9); border-bottom: 1px solid rgba(255, 255, 255, 0.05); overflow-x: auto;">
+        <span style="font-size: 0.65rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;">Quick Links:</span>
+        <button class="btn-quick-url violation-btn-sm" data-url="https://cloud.samsara.com/signin" style="height: 20px; padding: 0 8px; font-size: 0.65rem; background: rgba(255,255,255,0.08); color: #ecf0f1; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">🛰️ Samsara</button>
+        <button class="btn-quick-url violation-btn-sm" data-url="https://google.com" style="height: 20px; padding: 0 8px; font-size: 0.65rem; background: rgba(255,255,255,0.08); color: #ecf0f1; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">🔍 Google</button>
+        <button class="btn-quick-url violation-btn-sm" data-url="https://wikipedia.org" style="height: 20px; padding: 0 8px; font-size: 0.65rem; background: rgba(255,255,255,0.08); color: #ecf0f1; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">📚 Wikipedia</button>
+        <button class="btn-quick-url violation-btn-sm" data-url="https://example.com" style="height: 20px; padding: 0 8px; font-size: 0.65rem; background: rgba(255,255,255,0.08); color: #ecf0f1; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">🌐 Example.com</button>
+      </div>
 
       <!-- Main Browser Viewport Frame -->
       <div id="inapp-browser-viewport" style="flex: 1; width: 100%; height: 100%; position: relative; background: #0a0e14; overflow: hidden;">

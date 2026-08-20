@@ -538,66 +538,14 @@ const COUNTIF_PROXY_URL = 'https://topviewloggerr.onrender.com';
 
 function normalizeUrl(input) {
   let url = (input || '').trim();
-  if (!url) url = 'https://cloud.samsara.com/signin';
+  if (!url) return 'https://google.com';
   if (!/^https?:\/\//i.test(url)) {
     url = 'https://' + url;
   }
   return url;
 }
 
-async function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin') {
-  let targetUrl = normalizeUrl(initialUrl);
-
-  // Setup live polling while login browser is open
-  let authPollTimer = null;
-  const pollAuthStatus = async () => {
-    try {
-      const statusRes = await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/status`, 'GET');
-      if (statusRes && (statusRes.connected || statusRes.cookies)) {
-        if (statusRes.cookies) localStorage.setItem('samsara_session_cookies', statusRes.cookies);
-        if (statusRes.csrfToken) localStorage.setItem('samsara_csrf_token', statusRes.csrfToken);
-        updateSamsaraStatusUI(true, 'Samsara Connected');
-        startTelemetryOverlayUpdates();
-        
-        // 1. Auto-close native browser sheet & in-app modal
-        try { await Browser.close(); } catch(e) {}
-        closeInAppBrowser();
-        if (authPollTimer) clearInterval(authPollTimer);
-
-        // 2. Automatically navigate to live tracker map and render buses
-        openTrackerMapAndScan();
-      }
-    } catch (e) {}
-  };
-
-  // Start polling every 2 seconds for up to 3 minutes
-  authPollTimer = setInterval(pollAuthStatus, 2000);
-  setTimeout(() => { if (authPollTimer) clearInterval(authPollTimer); }, 180000);
-
-  // If running on native iOS/Android Capacitor app, use native in-app browser
-  if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform()) {
-    try {
-      console.log('[InAppBrowser] Opening native iOS/Android browser for:', targetUrl);
-      
-      const listener = await Browser.addListener('browserFinished', async () => {
-        console.log('[InAppBrowser] Native browser closed. Checking auth status...');
-        await pollAuthStatus();
-        if (authPollTimer) clearInterval(authPollTimer);
-        listener.remove();
-        closeInAppBrowser();
-        if (SamsaraEngine.hasActiveSession()) {
-          openTrackerMapAndScan();
-        }
-      });
-
-      await Browser.open({ url: targetUrl, windowName: '_blank' });
-      return;
-    } catch(e) {
-      console.warn('[InAppBrowser] Native Browser.open fallback:', e.message);
-    }
-  }
-
-  // Web / Desktop Fallback: In-app modal with Address Bar
+async function openInAppBrowser(initialUrl = '') {
   const modal = document.getElementById('inapp-browser-modal');
   const urlInput = document.getElementById('inapp-url-input');
   const iframe = document.getElementById('inapp-webview-frame');
@@ -605,27 +553,19 @@ async function openInAppBrowser(initialUrl = 'https://cloud.samsara.com/signin')
   const statusText = document.getElementById('inapp-status-text');
 
   if (modal) modal.classList.add('active');
+
+  const targetUrl = initialUrl ? normalizeUrl(initialUrl) : (urlInput?.value ? normalizeUrl(urlInput.value) : 'https://cloud.samsara.com/signin');
   if (urlInput) urlInput.value = targetUrl;
 
-  if (iframe) {
+  if (iframe && targetUrl) {
     iframe.src = targetUrl;
   }
 
-  if (SamsaraEngine.hasActiveSession()) {
-    if (statusBadge) {
-      statusBadge.style.background = 'rgba(46, 204, 113, 0.2)';
-      statusBadge.style.color = '#2ecc71';
-    }
-    if (statusText) statusText.textContent = 'Connected';
-  } else {
-    if (statusBadge) {
-      statusBadge.style.background = 'rgba(255,255,255,0.05)';
-      statusBadge.style.color = 'rgba(255,255,255,0.6)';
-    }
-    if (statusText) statusText.textContent = 'Waiting for Login...';
+  if (statusBadge && statusText) {
+    statusBadge.style.background = 'rgba(46, 204, 113, 0.15)';
+    statusBadge.style.color = '#2ecc71';
+    statusText.textContent = 'Browser Ready';
   }
-
-  startTelemetryOverlayUpdates();
 }
 
 function closeInAppBrowser() {
@@ -736,20 +676,50 @@ setTimeout(() => {
     });
   }
 
-  const navigateToEnteredUrl = () => {
-    if (inappUrlInput && iframe) {
-      const url = normalizeUrl(inappUrlInput.value);
-      inappUrlInput.value = url;
+  const navigateToEnteredUrl = async (customUrl = null) => {
+    const raw = customUrl || (inappUrlInput ? inappUrlInput.value : '');
+    const url = normalizeUrl(raw);
+    if (inappUrlInput) inappUrlInput.value = url;
+
+    // Update status badge
+    const statusText = document.getElementById('inapp-status-text');
+    if (statusText) statusText.textContent = 'Loading...';
+
+    // On native iOS/Android, open via native in-app browser
+    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform()) {
+      try {
+        console.log('[InAppBrowser] Opening native browser for:', url);
+        await Browser.open({ url, windowName: '_blank' });
+        if (statusText) statusText.textContent = 'Active';
+        return;
+      } catch(e) {
+        console.warn('[InAppBrowser] Native Browser.open fallback:', e.message);
+      }
+    }
+
+    // Web / Desktop mode: load in iframe
+    if (iframe) {
       iframe.src = url;
+      if (statusText) statusText.textContent = 'Loaded';
     }
   };
 
-  if (btnBrowserGo) btnBrowserGo.addEventListener('click', navigateToEnteredUrl);
+  if (btnBrowserGo) btnBrowserGo.addEventListener('click', () => navigateToEnteredUrl());
   if (inappUrlInput) {
     inappUrlInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') navigateToEnteredUrl();
     });
   }
+
+  // Quick Link Bookmark buttons
+  document.querySelectorAll('.btn-quick-url').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const url = btn.getAttribute('data-url');
+      if (url) {
+        navigateToEnteredUrl(url);
+      }
+    });
+  });
 
   if (btnBrowserReload && iframe) {
     btnBrowserReload.addEventListener('click', () => {
