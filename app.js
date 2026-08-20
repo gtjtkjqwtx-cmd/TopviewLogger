@@ -554,11 +554,20 @@ async function openInAppBrowser(initialUrl = '') {
 
   if (modal) modal.classList.add('active');
 
-  const targetUrl = initialUrl ? normalizeUrl(initialUrl) : (urlInput?.value ? normalizeUrl(urlInput.value) : 'https://cloud.samsara.com/signin');
+  const rawUrl = initialUrl || urlInput?.value || 'https://cloud.samsara.com/signin';
+  const targetUrl = normalizeUrl(rawUrl);
   if (urlInput) urlInput.value = targetUrl;
 
-  if (iframe && targetUrl) {
-    iframe.src = targetUrl;
+  let frameUrl = targetUrl;
+  if (targetUrl.includes('samsara.com') || targetUrl.includes('/signin')) {
+    try {
+      await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/auth-start`, 'GET');
+    } catch(e) {}
+    frameUrl = `${SamsaraEngine.PROXY_BASE}/signin`;
+  }
+
+  if (iframe) {
+    iframe.src = frameUrl;
   }
 
   if (statusBadge && statusText) {
@@ -678,9 +687,17 @@ setTimeout(() => {
     const statusText = document.getElementById('inapp-status-text');
     if (statusText) statusText.textContent = 'Loading...';
 
+    let frameUrl = url;
+    if (url.includes('samsara.com') || url.includes('/signin')) {
+      try {
+        await xhrProxyRequest(`${SamsaraEngine.PROXY_BASE}/api/samsara/auth-start`, 'GET');
+      } catch(e) {}
+      frameUrl = `${SamsaraEngine.PROXY_BASE}/signin`;
+    }
+
     // Strictly load inside the in-app viewport frame
     if (iframe) {
-      iframe.src = url;
+      iframe.src = frameUrl;
       if (statusText) statusText.textContent = 'Loaded';
     }
   };
