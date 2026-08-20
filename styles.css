@@ -861,3 +861,114 @@ button:active { transform: scale(.92) !important; background: rgba(255,255,255,0
   background: rgba(255, 255, 255, 0.15);
   border-color: rgba(255, 255, 255, 0.25);
 }
+
+/* ============================================================
+   DISPATCH REPORT QOL STYLES
+   ============================================================ */
+.portal-copy-toast {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: rgba(14, 39, 25, 0.95);
+  border: 1px solid rgba(46, 204, 113, 0.5);
+  color: #2ecc71;
+  padding: 8px 18px;
+  border-radius: 50px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(15px);
+  z-index: 100000;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.portal-copy-toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+.portal-quick-input-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.portal-input-box {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 4px 6px 4px 10px;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.portal-input-box:focus-within {
+  border-color: var(--green);
+  background: rgba(46, 204, 113, 0.05);
+}
+
+.portal-input-box input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #ecf0f1;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.portal-input-box input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+  font-weight: 400;
+}
+
+.portal-input-btn {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ecf0f1;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.portal-input-btn:hover {
+  background: var(--green);
+  color: #0e131a;
+  border-color: var(--green);
+}
+
+.btn-start-session-card {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: rgba(46, 204, 113, 0.15);
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  color: #2ecc71;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.btn-start-session-card:hover {
+  background: var(--green);
+  color: #0e131a;
+}
+

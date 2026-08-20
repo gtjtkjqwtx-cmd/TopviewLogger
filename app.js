@@ -985,9 +985,14 @@ async function fetchDispatchData(contextLabel = 'Data') {
       if (portalData.length === 0) {
         console.warn(`[Portal] WARNING: No dispatch records found for query "${contextLabel}"`);
       }
-        renderPortalResults(portalData.slice(0, 5));
-        document.getElementById('portal-results-count').textContent = `${portalData.length}`;
-        document.getElementById('portal-filter-tag').textContent = 'Live Feed';
+      currentPortalFilterMatches = portalData;
+      currentPortalFilterLabel = 'Live Feed';
+      currentPortalFilterOptions = {};
+      portalShowAll = false;
+      renderPortalResults(portalData, 'Live Feed');
+      document.getElementById('portal-results-count').textContent = `${portalData.length}`;
+      document.getElementById('portal-filter-tag').textContent = 'Live Feed';
+      hidePortalFilterChip();
     } else {
       if (result.message === 'Session expired.') {
         alert('CountIf Session Expired. Please reconnect.');
@@ -1009,10 +1014,88 @@ async function fetchDispatchData(contextLabel = 'Data') {
   }
 }
 
+// ── State for Filter & Expand Toggle ──
+let currentPortalFilterMatches = [];
+let currentPortalFilterLabel = '';
+let currentPortalFilterOptions = {};
+let portalShowAll = false;
+
+function getRelativeTimeStr(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  const diffMs = Date.now() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function showCopyToast(msg = '✓ Copied to Clipboard') {
+  const toast = document.getElementById('portal-copy-toast');
+  if (!toast) return;
+  toast.textContent = msg;
+  toast.style.display = 'block';
+  setTimeout(() => toast.classList.add('show'), 10);
+  clearTimeout(toast._timeout);
+  toast._timeout = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      if (!toast.classList.contains('show')) toast.style.display = 'none';
+    }, 300);
+  }, 2000);
+}
+
+function showPortalFilterChip(label) {
+  const chip = document.getElementById('portal-active-filter-badge');
+  const text = document.getElementById('portal-active-filter-text');
+  if (chip && text) {
+    text.textContent = label;
+    chip.style.display = 'flex';
+  }
+}
+
+function hidePortalFilterChip() {
+  const chip = document.getElementById('portal-active-filter-badge');
+  if (chip) chip.style.display = 'none';
+}
+
+window.startSessionWithDispatch = function(bus, driver) {
+  closeDispatchOverlayModal();
+  const flBusInput = document.getElementById('fl-bus-number');
+  const flDriverInput = document.getElementById('fl-driver-name');
+  
+  if (flBusInput && flDriverInput) {
+    flBusInput.value = bus || '';
+    flDriverInput.value = driver || '';
+    
+    // Switch to Full Loop new report view
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const flNewView = document.getElementById('fl-new-view');
+    if (flNewView) {
+      flNewView.classList.add('active');
+      const timeInput = document.getElementById('fl-time-started');
+      if (timeInput && !timeInput.value) {
+        const now = new Date();
+        timeInput.value = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      }
+    }
+  }
+  showCopyToast(`✓ Loaded Bus ${bus} into New Report`);
+};
+
 function renderPortalResults(records, filterLabel = '', options = {}) {
+  currentPortalFilterMatches = records || [];
+  currentPortalFilterLabel = filterLabel;
+  currentPortalFilterOptions = options;
+
   const list = document.getElementById('portal-results-list');
   const area = document.getElementById('portal-results-area');
   const tag = document.getElementById('portal-filter-tag');
+  const toggleBtn = document.getElementById('btn-portal-toggle-all');
   
   const snapshotArea = document.getElementById('portal-snapshot-area');
   const driverRow = document.getElementById('portal-snapshot-driver');
@@ -1054,7 +1137,9 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
         
         const driverName = records[0].operator;
         const timeStr = formatDisplayTime(records[0].date);
-        drVal.innerHTML = `${driverName} <span style="opacity:0.6; font-weight:400; margin-left:4px;">(${timeStr})</span>`;
+        const relTime = getRelativeTimeStr(records[0].date);
+        const timeBadge = relTime ? `${timeStr} (${relTime})` : timeStr;
+        drVal.innerHTML = `${driverName} <span style="opacity:0.6; font-weight:400; margin-left:4px;">${timeBadge}</span>`;
         
         // Add or update copy button
         let copyBtn = driverRow.querySelector('.btn-copy-driver');
@@ -1065,38 +1150,38 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
           copyBtn.innerHTML = '<svg class="icon-xs" style="fill: var(--green);"><use href="#icon-clipboard"/></svg>';
           driverRow.appendChild(copyBtn);
         }
-        copyBtn.onclick = () => copyToClipboard(driverName, copyBtn);
+        copyBtn.onclick = () => {
+          navigator.clipboard.writeText(driverName).then(() => showCopyToast(`✓ Copied: ${driverName}`));
+        };
       }
       if (isStop) {
         superRow.style.display = 'flex';
         
-        // Search ALL records for this stop (not just the 5 displayed)
+        // Search ALL records for this stop (not just the displayed ones)
         const allMatches = options.allMatches || records;
-        // Find the most recent user who HAS a supervisor/coordinator role AND is NOT blacklisted
         const validRec = allMatches.find(r => isSupervisor(r.user) && !isBlacklisted(r.user)) || allMatches[0];
         
-        // Extract H:MM
         let timeStr = '---';
         const parts = validRec.date.split(' ');
         if (parts.length >= 2) {
-          const timeParts = parts[1].split(':'); // "8:00:43"
+          const timeParts = parts[1].split(':');
           if (timeParts.length >= 2) {
              const ampm = parts[2] || '';
              timeStr = `${timeParts[0]}:${timeParts[1]} ${ampm}`.trim();
           }
         }
+        const relTime = getRelativeTimeStr(validRec.date);
+        const displaySuperTime = relTime ? `${timeStr} (${relTime})` : timeStr;
         
-        supVal.textContent = `${validRec.user} | ${timeStr}`;
+        supVal.textContent = `${validRec.user} | ${displaySuperTime}`;
         
         // Setup copy button
         const copyBtn = document.getElementById('btn-copy-snapshot-super');
-        copyBtn.onclick = () => {
-           navigator.clipboard.writeText(validRec.user).then(() => {
-              const originalColor = copyBtn.style.background;
-              copyBtn.style.background = 'var(--green)';
-              setTimeout(() => copyBtn.style.background = originalColor, 500);
-           });
-        };
+        if (copyBtn) {
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(validRec.user).then(() => showCopyToast(`✓ Copied: ${validRec.user}`));
+          };
+        }
       }
     }
   }
@@ -1104,77 +1189,146 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
   if (!records || records.length === 0) {
     list.innerHTML = `<div style="text-align:center; padding: 2rem; opacity:0.5; font-size:0.8rem;">No matching entries found.</div>`;
     area.style.display = 'block';
+    if (toggleBtn) toggleBtn.style.display = 'none';
     return;
   }
 
+  // Handle "Show All" Expand Toggle
+  const displayRecords = portalShowAll ? records : records.slice(0, 5);
+  if (toggleBtn) {
+    if (records.length > 5) {
+      toggleBtn.style.display = 'block';
+      toggleBtn.textContent = portalShowAll ? `Show Top 5 (of ${records.length})` : `Show All (${records.length} Entries)`;
+    } else {
+      toggleBtn.style.display = 'none';
+    }
+  }
+
   area.style.display = 'block';
-  list.innerHTML = records.map(record => {
-    // Auto-detect if we should hide date (if label includes "Bus" or "Stop")
-    const isFiltered = filterLabel.toLowerCase().includes('bus') || 
-                       filterLabel.toLowerCase().includes('stop') || 
-                       options.timeOnly;
-    
-    let timestamp = record.date;
-    if (isFiltered) {
-      // Extract time from: "4/20/2026 1:18:41 PM"
-      const parts = record.date.split(' ');
-      if (parts.length >= 2) {
-        timestamp = parts.slice(1).join(' '); // "1:18:41 PM"
-      }
+  list.innerHTML = displayRecords.map(record => {
+    let timeFormatted = '';
+    const parts = record.date.split(' ');
+    if (parts.length >= 2) {
+      const timeParts = parts[1].split(':');
+      const ampm = parts[2] || '';
+      timeFormatted = `${timeParts[0]}:${timeParts[1]} ${ampm}`.trim();
+    } else {
+      timeFormatted = record.date;
     }
 
+    const relTime = getRelativeTimeStr(record.date);
+    const displayTimestamp = relTime ? `${timeFormatted} <span style="opacity:0.6; font-size:0.75rem; font-weight:400;">(${relTime})</span>` : timeFormatted;
+
+    const busEsc = (record.bus || '').replace(/'/g, "\\'");
+    const opEsc = (record.operator || '').replace(/'/g, "\\'");
+
     return `
-      <div class="result-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 0.8rem; margin-bottom: 0.5rem;">
+      <div class="result-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 0.8rem; margin-bottom: 0.5rem;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.4rem;">
           <span style="color: var(--green); font-weight: 700; font-size: 0.95rem;">Bus ${record.bus}</span>
-          <span style="font-size: 0.85rem; font-weight: 600; opacity: 0.8; color: white;">${timestamp}</span>
+          <span style="font-size: 0.85rem; font-weight: 600; opacity: 0.9; color: white;">${displayTimestamp}</span>
         </div>
-        ${options.hideStop ? '' : `<div style="font-size: 0.8rem; color: white; margin-bottom: 0.3rem; opacity: 0.9;">${record.stop}</div>`}
-        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; opacity: 0.8; font-weight: 500;">
-          <span>${record.operator} • ${record.route}</span>
-          <button class="violation-btn-sm" style="width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(46, 204, 113, 0.1); border: 1px solid rgba(46, 204, 113, 0.2);" 
-                  onclick="copyToClipboard('${record.operator.replace(/'/g, "\\'")}', this)" title="Copy Driver Name">
-            <svg style="width: 14px; height: 14px; fill: var(--green);"><use href="#icon-folder"/></svg>
-          </button>
+        ${options.hideStop ? '' : `<div style="font-size: 0.8rem; color: white; margin-bottom: 0.4rem; opacity: 0.85;">${record.stop}</div>`}
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; opacity: 0.9; font-weight: 500; margin-top: 6px;">
+          <span>${record.operator} • <span style="opacity:0.7;">${record.route}</span></span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <button class="btn-start-session-card" onclick="window.startSessionWithDispatch('${busEsc}', '${opEsc}')" title="Start Session with this Bus & Driver">
+              <span>⚡ Start Session</span>
+            </button>
+            <button class="violation-btn-sm" style="width: 26px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(46, 204, 113, 0.1); border: 1px solid rgba(46, 204, 113, 0.2);" 
+                    onclick="navigator.clipboard.writeText('${opEsc}').then(() => showCopyToast('✓ Copied: ${opEsc}'))" title="Copy Driver Name">
+              <svg style="width: 13px; height: 13px; fill: var(--green);"><use href="#icon-clipboard"/></svg>
+            </button>
+          </div>
         </div>
       </div>
     `;
   }).join('');
 }
 
-async function filterPortalData(type) {
-  // Always verify we have a session
-  if (!portalSessionCookie) return;
-  
-  if (type === 'bus') {
-    const busNum = window.prompt('Enter Bus #:');
-    if (busNum === null) return;
-    if (!busNum.trim()) return alert('Please enter a Bus #');
-    
-    // Refresh data FIRST
-    await fetchDispatchData(`Bus #${busNum.trim()}`);
-    
-    const matches = portalData.filter(r => r.bus === busNum.trim());
-    renderPortalResults(matches.slice(0, 5), `Bus ${busNum}`, { timeOnly: true });
-  } else if (type === 'stop') {
-    const stopNum = window.prompt('Enter Stop #:');
-    if (stopNum === null) return;
-    if (!stopNum.trim()) return alert('Please enter a Stop #');
-    
-    // Refresh data FIRST
-    await fetchDispatchData(`Stop #${stopNum.trim()}`);
-    
-    // Use exact stop number matching: "STOP 1 " won't match "STOP 10", "STOP 13", etc.
-    const target = `STOP ${stopNum.trim()} `;
-    const matches = portalData.filter(r => r.stop && r.stop.includes(target));
-    // Pass ALL matches for supervisor lookup, but only display 5
-    renderPortalResults(matches.slice(0, 5), `Stop ${stopNum}`, { hideStop: true, allMatches: matches });
+// ── Inline Filtering Handlers (Replaces window.prompt) ──
+async function applyInlineBusFilter() {
+  const input = document.getElementById('portal-input-bus');
+  if (!input) return;
+  const busNum = input.value.trim();
+  if (!busNum) {
+    showCopyToast('Please enter a Bus #');
+    return;
   }
+  if (!portalSessionCookie) return;
+
+  await fetchDispatchData(`Bus #${busNum}`);
+  const matches = portalData.filter(r => r.bus && r.bus.toString().includes(busNum));
+  portalShowAll = false;
+  showPortalFilterChip(`Bus #${busNum}`);
+  renderPortalResults(matches, `Bus ${busNum}`, { timeOnly: true });
 }
 
-document.getElementById('btn-portal-bus').addEventListener('click', () => filterPortalData('bus'));
-document.getElementById('btn-portal-stop').addEventListener('click', () => filterPortalData('stop'));
-document.getElementById('btn-portal-refresh').addEventListener('click', () => fetchDispatchData());
+async function applyInlineStopFilter() {
+  const input = document.getElementById('portal-input-stop');
+  if (!input) return;
+  const stopNum = input.value.trim();
+  if (!stopNum) {
+    showCopyToast('Please enter a Stop #');
+    return;
+  }
+  if (!portalSessionCookie) return;
+
+  await fetchDispatchData(`Stop #${stopNum}`);
+  const target = `STOP ${stopNum} `;
+  const matches = portalData.filter(r => r.stop && r.stop.includes(target));
+  portalShowAll = false;
+  showPortalFilterChip(`Stop #${stopNum}`);
+  renderPortalResults(matches, `Stop ${stopNum}`, { hideStop: true, allMatches: matches });
+}
+
+// ── Clear Filter Handler ──
+function clearPortalFilter() {
+  const busInput = document.getElementById('portal-input-bus');
+  const stopInput = document.getElementById('portal-input-stop');
+  if (busInput) busInput.value = '';
+  if (stopInput) stopInput.value = '';
+  hidePortalFilterChip();
+  portalShowAll = false;
+  renderPortalResults(portalData, 'Live Feed');
+}
+
+// ── Event Listeners ──
+const btnFilterBus = document.getElementById('btn-portal-filter-bus');
+if (btnFilterBus) btnFilterBus.addEventListener('click', applyInlineBusFilter);
+
+const inputBus = document.getElementById('portal-input-bus');
+if (inputBus) {
+  inputBus.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') applyInlineBusFilter();
+  });
+}
+
+const btnFilterStop = document.getElementById('btn-portal-filter-stop');
+if (btnFilterStop) btnFilterStop.addEventListener('click', applyInlineStopFilter);
+
+const inputStop = document.getElementById('portal-input-stop');
+if (inputStop) {
+  inputStop.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') applyInlineStopFilter();
+  });
+}
+
+const btnClearFilter = document.getElementById('btn-clear-portal-filter');
+if (btnClearFilter) btnClearFilter.addEventListener('click', clearPortalFilter);
+
+const btnToggleAll = document.getElementById('btn-portal-toggle-all');
+if (btnToggleAll) {
+  btnToggleAll.addEventListener('click', () => {
+    portalShowAll = !portalShowAll;
+    renderPortalResults(currentPortalFilterMatches, currentPortalFilterLabel, currentPortalFilterOptions);
+  });
+}
+
+document.getElementById('btn-portal-refresh').addEventListener('click', () => {
+  clearPortalFilter();
+  fetchDispatchData();
+});
 
 document.getElementById('btn-countif-connect').addEventListener('click', async () => {
   const btn = document.getElementById('btn-countif-connect');
