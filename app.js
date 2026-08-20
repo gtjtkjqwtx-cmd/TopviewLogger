@@ -669,13 +669,6 @@ setTimeout(() => {
 
   if (btnCloseBrowser) btnCloseBrowser.addEventListener('click', closeInAppBrowser);
 
-  if (btnBrowserPopup) {
-    btnBrowserPopup.addEventListener('click', () => {
-      const url = normalizeUrl(inappUrlInput ? inappUrlInput.value : 'https://cloud.samsara.com/signin');
-      window.open(url, 'samsara-pc-window', 'width=1150,height=850,scrollbars=yes,resizable=yes');
-    });
-  }
-
   const navigateToEnteredUrl = async (customUrl = null) => {
     const raw = customUrl || (inappUrlInput ? inappUrlInput.value : '');
     const url = normalizeUrl(raw);
@@ -685,19 +678,7 @@ setTimeout(() => {
     const statusText = document.getElementById('inapp-status-text');
     if (statusText) statusText.textContent = 'Loading...';
 
-    // On native iOS/Android, open via native in-app browser
-    if (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform()) {
-      try {
-        console.log('[InAppBrowser] Opening native browser for:', url);
-        await Browser.open({ url, windowName: '_blank' });
-        if (statusText) statusText.textContent = 'Active';
-        return;
-      } catch(e) {
-        console.warn('[InAppBrowser] Native Browser.open fallback:', e.message);
-      }
-    }
-
-    // Web / Desktop mode: load in iframe
+    // Strictly load inside the in-app viewport frame
     if (iframe) {
       iframe.src = url;
       if (statusText) statusText.textContent = 'Loaded';
