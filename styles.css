@@ -891,10 +891,12 @@ button:active { transform: scale(.92) !important; background: rgba(255,255,255,0
 }
 
 .portal-quick-input-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
   margin-bottom: 1rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .portal-input-box {
@@ -903,8 +905,10 @@ button:active { transform: scale(.92) !important; background: rgba(255,255,255,0
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
-  padding: 4px 6px 4px 10px;
-  gap: 6px;
+  padding: 6px 8px 6px 12px;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
   transition: all 0.2s ease;
 }
 
