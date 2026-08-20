@@ -709,10 +709,14 @@ const samsaraProxy = createProxyMiddleware({
       }
 
       forwardCookies(proxyReq, req);
-      const csrf = req.headers['x-csrf-token'] || req.headers['csrf-token'];
+      const csrf = req.headers['x-csrf-token'] || req.headers['csrf-token'] || req.headers['x-xsrf-token'];
       if (csrf) {
         samsaraCsrfToken = csrf;
         console.log('[SamsaraAuth] Captured CSRF token:', csrf);
+      } else if (samsaraCsrfToken) {
+        proxyReq.setHeader('X-Csrf-Token', samsaraCsrfToken);
+        proxyReq.setHeader('X-Xsrf-Token', samsaraCsrfToken);
+        console.log('[SamsaraAuth] Injected captured CSRF token:', samsaraCsrfToken);
       }
     },
     proxyRes: (proxyRes, req, res) => {
