@@ -947,7 +947,7 @@ let portalSessionCookie = localStorage.getItem('portal_session_cookie');
 let portalData = [];
 let portalLastSync = 0; // Timestamp of last successful dispatch sync
 
-async function fetchDispatchData(contextLabel = 'Data') {
+async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
   if (!portalSessionCookie) return;
   
   const refreshBtn = document.getElementById('btn-portal-refresh');
@@ -955,21 +955,27 @@ async function fetchDispatchData(contextLabel = 'Data') {
   const syncMessage = document.getElementById('portal-sync-message');
   const syncProgress = document.getElementById('portal-sync-progress');
   
-  const originalText = refreshBtn.querySelector('span').textContent;
-  refreshBtn.disabled = true;
-  refreshBtn.querySelector('span').textContent = 'Syncing...';
-  refreshBtn.style.opacity = '0.7';
+  let originalText = 'Refresh Feed';
+  if (refreshBtn && !isSilent) {
+    const span = refreshBtn.querySelector('span');
+    if (span) {
+      originalText = span.textContent;
+      span.textContent = 'Syncing...';
+    }
+    refreshBtn.disabled = true;
+    refreshBtn.style.opacity = '0.7';
+  }
 
-  // Show status indicator
-  syncIndicator.style.display = 'block';
-  syncMessage.textContent = `Syncing ${contextLabel}...`;
-  syncProgress.classList.add('sync-anim');
+  // Show status indicator only if not silent
+  if (syncIndicator && !isSilent) {
+    syncIndicator.style.display = 'block';
+    if (syncMessage) syncMessage.textContent = `Syncing ${contextLabel}...`;
+    if (syncProgress) syncProgress.classList.add('sync-anim');
+  }
 
   try {
-    const searchQuery = contextLabel === 'Data' ? '' : contextLabel;
-    const queryParam = searchQuery ? `&query=${encodeURIComponent(searchQuery)}` : '';
     const limitParam = '&limit=500';
-    const result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}${queryParam}${limitParam}`, 'GET');
+    const result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}${limitParam}`, 'GET');
 
     if (result.success) {
       const now = new Date();
@@ -980,39 +986,78 @@ async function fetchDispatchData(contextLabel = 'Data') {
         return diffHrs <= 24;
       });
       portalLastSync = Date.now();
-      console.log(`[Portal] Synced ${portalData.length} records (24h filter) for "${contextLabel}"`);
+      console.log(`[Portal] Synced ${portalData.length} records (24h filter)`);
       
-      if (portalData.length === 0) {
-        console.warn(`[Portal] WARNING: No dispatch records found for query "${contextLabel}"`);
+      const countEl = document.getElementById('portal-results-count');
+      if (countEl) countEl.textContent = `${portalData.length}`;
+
+      // Check if user currently has an active filter applied
+      const busInput = document.getElementById('portal-input-bus');
+      const stopInput = document.getElementById('portal-input-stop');
+      const activeBus = busInput ? busInput.value.trim() : '';
+      const activeStop = stopInput ? stopInput.value.trim() : '';
+
+      if (activeBus) {
+        applyInlineBusFilter();
+      } else if (activeStop) {
+        applyInlineStopFilter();
+      } else {
+        currentPortalFilterMatches = portalData;
+        currentPortalFilterLabel = 'Live Feed';
+        currentPortalFilterOptions = {};
+        renderPortalResults(portalData, 'Live Feed');
+        const filterTag = document.getElementById('portal-filter-tag');
+        if (filterTag) filterTag.textContent = 'Live Feed';
+        hidePortalFilterChip();
       }
-      currentPortalFilterMatches = portalData;
-      currentPortalFilterLabel = 'Live Feed';
-      currentPortalFilterOptions = {};
-      portalShowAll = false;
-      renderPortalResults(portalData, 'Live Feed');
-      document.getElementById('portal-results-count').textContent = `${portalData.length}`;
-      document.getElementById('portal-filter-tag').textContent = 'Live Feed';
-      hidePortalFilterChip();
+
+      // Start 15-second background auto-sync loop
+      startDispatchAutoSync();
     } else {
       if (result.message === 'Session expired.') {
-        alert('CountIf Session Expired. Please reconnect.');
-        countifResetDashboard();
+        if (!isSilent) {
+          alert('CountIf Session Expired. Please reconnect.');
+          countifResetDashboard();
+        }
       }
     }
   } catch (err) {
-    console.error('[Portal] Sync error:', err);
+    if (!isSilent) console.error('[Portal] Sync error:', err);
   } finally {
-    refreshBtn.disabled = false;
-    refreshBtn.querySelector('span').textContent = originalText;
-    refreshBtn.style.opacity = '1';
+    if (refreshBtn && !isSilent) {
+      refreshBtn.disabled = false;
+      const span = refreshBtn.querySelector('span');
+      if (span) span.textContent = originalText;
+      refreshBtn.style.opacity = '1';
+    }
     
-    // Hide indicator after a small delay for visual weight
-    setTimeout(() => {
-      syncIndicator.style.display = 'none';
-      syncProgress.classList.remove('sync-anim');
-    }, 800);
+    if (syncIndicator && !isSilent) {
+      setTimeout(() => {
+        syncIndicator.style.display = 'none';
+        if (syncProgress) syncProgress.classList.remove('sync-anim');
+      }, 800);
+    }
   }
 }
+
+// ── Background Auto-Sync (Every 15 Seconds) & Keep-Alive ──
+let dispatchAutoSyncTimer = null;
+
+function startDispatchAutoSync() {
+  if (dispatchAutoSyncTimer) return;
+  dispatchAutoSyncTimer = setInterval(() => {
+    if (portalSessionCookie) {
+      fetchDispatchData('Data', true);
+    }
+  }, 15000); // 15 seconds
+}
+
+// Keep Render backend awake 24/7 (ping every 4 minutes)
+setInterval(() => {
+  try {
+    xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/health`, 'GET').catch(() => {});
+  } catch(e) {}
+}, 4 * 60 * 1000);
 
 // ── State for Filter & Expand Toggle ──
 let currentPortalFilterMatches = [];
@@ -1246,37 +1291,56 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
   }).join('');
 }
 
-// ── Inline Filtering Handlers (Replaces window.prompt) ──
-async function applyInlineBusFilter() {
+// ── Inline Filtering Handlers (Instant In-Memory Search <1ms) ──
+function applyInlineBusFilter() {
   const input = document.getElementById('portal-input-bus');
   if (!input) return;
   const busNum = input.value.trim();
   if (!busNum) {
-    showCopyToast('Please enter a Bus #');
+    clearPortalFilter();
     return;
   }
-  if (!portalSessionCookie) return;
 
-  await fetchDispatchData(`Bus #${busNum}`);
-  const matches = portalData.filter(r => r.bus && r.bus.toString().includes(busNum));
+  // If no data loaded yet, fetch first
+  if (!portalData || portalData.length === 0) {
+    if (portalSessionCookie) fetchDispatchData();
+    return;
+  }
+
+  const cleanBus = busNum.replace(/^0+/, '');
+  const matches = (portalData || []).filter(r => {
+    if (!r.bus) return false;
+    const recBus = r.bus.toString().replace(/^0+/, '');
+    return recBus.includes(cleanBus);
+  });
+
   portalShowAll = false;
   showPortalFilterChip(`Bus #${busNum}`);
   renderPortalResults(matches, `Bus ${busNum}`, { timeOnly: true });
 }
 
-async function applyInlineStopFilter() {
+function applyInlineStopFilter() {
   const input = document.getElementById('portal-input-stop');
   if (!input) return;
   const stopNum = input.value.trim();
   if (!stopNum) {
-    showCopyToast('Please enter a Stop #');
+    clearPortalFilter();
     return;
   }
-  if (!portalSessionCookie) return;
 
-  await fetchDispatchData(`Stop #${stopNum}`);
+  // If no data loaded yet, fetch first
+  if (!portalData || portalData.length === 0) {
+    if (portalSessionCookie) fetchDispatchData();
+    return;
+  }
+
   const target = `STOP ${stopNum} `;
-  const matches = portalData.filter(r => r.stop && r.stop.includes(target));
+  const matches = (portalData || []).filter(r => {
+    if (!r.stop) return false;
+    const s = r.stop.toUpperCase();
+    return s.includes(target) || s.includes(`STOP #${stopNum}`) || s.includes(`STOP ${stopNum}`);
+  });
+
   portalShowAll = false;
   showPortalFilterChip(`Stop #${stopNum}`);
   renderPortalResults(matches, `Stop ${stopNum}`, { hideStop: true, allMatches: matches });
@@ -1299,6 +1363,7 @@ if (btnFilterBus) btnFilterBus.addEventListener('click', applyInlineBusFilter);
 
 const inputBus = document.getElementById('portal-input-bus');
 if (inputBus) {
+  inputBus.addEventListener('input', () => applyInlineBusFilter());
   inputBus.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') applyInlineBusFilter();
   });
@@ -1309,6 +1374,7 @@ if (btnFilterStop) btnFilterStop.addEventListener('click', applyInlineStopFilter
 
 const inputStop = document.getElementById('portal-input-stop');
 if (inputStop) {
+  inputStop.addEventListener('input', () => applyInlineStopFilter());
   inputStop.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') applyInlineStopFilter();
   });
@@ -1327,7 +1393,7 @@ if (btnToggleAll) {
 
 document.getElementById('btn-portal-refresh').addEventListener('click', () => {
   clearPortalFilter();
-  fetchDispatchData();
+  fetchDispatchData('Data', false);
 });
 
 document.getElementById('btn-countif-connect').addEventListener('click', async () => {

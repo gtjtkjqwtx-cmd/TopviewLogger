@@ -171,11 +171,29 @@ app.post('/api/countif/login', async (req, res) => {
 
 import * as cheerio from 'cheerio';
 
+let dispatchServerCache = {
+  data: null,
+  timestamp: 0,
+  cookie: null
+};
+
 app.get('/api/countif/dispatch', async (req, res) => {
   const sessionCookie = req.query.cookie;
 
   if (!sessionCookie) {
     return res.status(401).json({ success: false, message: 'No session cookie provided.' });
+  }
+
+  // Fast-path: return cached response if fetched within last 10 seconds for same session
+  if (dispatchServerCache.data && 
+      dispatchServerCache.cookie === sessionCookie && 
+      (Date.now() - dispatchServerCache.timestamp < 10000)) {
+    return res.json({ 
+      success: true, 
+      count: dispatchServerCache.data.length, 
+      data: dispatchServerCache.data, 
+      cached: true 
+    });
   }
 
   const REPORT_URL = 'https://www.countif.net/Administration/Reports/DispatchReport.aspx';
@@ -274,6 +292,12 @@ app.get('/api/countif/dispatch', async (req, res) => {
             });
         }
     });
+
+    dispatchServerCache = {
+      data: rows,
+      timestamp: Date.now(),
+      cookie: sessionCookie
+    };
 
     return res.json({
         success: true,
