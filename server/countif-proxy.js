@@ -246,33 +246,9 @@ async function ensureCountIfSession(forceRefresh = false) {
   return countifServerSessionCookie;
 }
 
-app.get('/api/countif/dispatch', async (req, res) => {
-  let sessionCookie = req.query.cookie || countifServerSessionCookie;
-
-  if (!sessionCookie) {
-    try {
-      sessionCookie = await ensureCountIfSession();
-    } catch(err) {
-      console.error('[DispatchScraper] Initial auto-login failed:', err.message);
-      return res.status(401).json({ success: false, message: 'Auto-login failed: ' + err.message });
-    }
-  }
-
-  // Fast-path: return cached response if fetched within last 10 seconds
-  if (dispatchServerCache.data && 
-      (Date.now() - dispatchServerCache.timestamp < 10000)) {
-    return res.json({ 
-      success: true, 
-      count: dispatchServerCache.data.length, 
-      data: dispatchServerCache.data, 
-      cached: true,
-      sessionCookie: sessionCookie
-    });
-  }
-
   const REPORT_URL = 'https://www.countif.net/Administration/Reports/DispatchReport.aspx';
 
-  async function scrapePage(cookieToUse) {
+  async function scrapeCountIfDispatch(cookieToUse) {
     const reportRes = await fetch(REPORT_URL, {
       method: 'GET',
       headers: {
@@ -382,15 +358,95 @@ app.get('/api/countif/dispatch', async (req, res) => {
     return rows;
   }
 
+  // Background Scraper Worker (Keeps RAM warm every 15 seconds)
+  let isBackgroundScraping = false;
+  async function runBackgroundDispatchScraper() {
+    if (isBackgroundScraping) return;
+    isBackgroundScraping = true;
+    try {
+      let cookie = countifServerSessionCookie;
+      if (!cookie) {
+        cookie = await ensureCountIfSession();
+      }
+      let rows;
+      try {
+        rows = await scrapeCountIfDispatch(cookie);
+      } catch(e) {
+        if (e.message === 'SESSION_EXPIRED') {
+          cookie = await ensureCountIfSession(true);
+          rows = await scrapeCountIfDispatch(cookie);
+        } else {
+          throw e;
+        }
+      }
+      if (rows && rows.length > 0) {
+        dispatchServerCache = {
+          data: rows,
+          timestamp: Date.now(),
+          cookie: cookie
+        };
+      }
+    } catch(err) {
+      console.warn('[BackgroundScraper] Ping failed:', err.message);
+    } finally {
+      isBackgroundScraping = false;
+    }
+  }
+
+  // Start background warm worker (15s interval)
+  setInterval(runBackgroundDispatchScraper, 15000);
+  setTimeout(runBackgroundDispatchScraper, 2000);
+
+app.get('/api/countif/dispatch', async (req, res) => {
+  const sinceParam = req.query.since ? Number(req.query.since) : 0;
+
+  // Function to filter by sinceParam if present
+  const prepareResponse = (rows, lastSync) => {
+    if (sinceParam > 0) {
+      const delta = rows.filter(r => {
+        if (!r.date) return false;
+        const t = new Date(r.date).getTime();
+        return !isNaN(t) && t > sinceParam;
+      });
+      return {
+        success: true,
+        count: delta.length,
+        totalInCache: rows.length,
+        data: delta,
+        isDelta: true,
+        lastSync: lastSync,
+        sessionCookie: dispatchServerCache.cookie || countifServerSessionCookie
+      };
+    }
+    return {
+      success: true,
+      count: rows.length,
+      data: rows,
+      isDelta: false,
+      lastSync: lastSync,
+      sessionCookie: dispatchServerCache.cookie || countifServerSessionCookie
+    };
+  };
+
+  // Instant fast-path from warm memory cache (up to 45 seconds fresh)
+  if (dispatchServerCache.data && (Date.now() - dispatchServerCache.timestamp < 45000)) {
+    return res.json(prepareResponse(dispatchServerCache.data, dispatchServerCache.timestamp));
+  }
+
+  // Fallback: synchronous fetch if cache is cold
   try {
+    let sessionCookie = req.query.cookie || countifServerSessionCookie;
+    if (!sessionCookie) {
+      sessionCookie = await ensureCountIfSession();
+    }
+
     let rows;
     try {
-      rows = await scrapePage(sessionCookie);
+      rows = await scrapeCountIfDispatch(sessionCookie);
     } catch(scrapeErr) {
       if (scrapeErr.message === 'SESSION_EXPIRED') {
-        console.log('[DispatchScraper] Session expired. Re-authenticating automatically in background...');
         sessionCookie = await ensureCountIfSession(true);
-        rows = await scrapePage(sessionCookie);
+        rows = await scrapeCountIfDispatch(sessionCookie);
       } else {
         throw scrapeErr;
       }
@@ -402,15 +458,13 @@ app.get('/api/countif/dispatch', async (req, res) => {
       cookie: sessionCookie
     };
 
-    return res.json({
-      success: true,
-      count: rows.length,
-      data: rows,
-      sessionCookie: sessionCookie
-    });
-
+    return res.json(prepareResponse(rows, dispatchServerCache.timestamp));
   } catch (err) {
     console.error('[DispatchScraper] Error:', err);
+    // If error but we have slightly older cache, return cached data rather than failing
+    if (dispatchServerCache.data) {
+      return res.json(prepareResponse(dispatchServerCache.data, dispatchServerCache.timestamp));
+    }
     return res.status(500).json({ success: false, message: err.message });
   }
 });

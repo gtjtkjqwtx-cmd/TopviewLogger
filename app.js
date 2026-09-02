@@ -1064,9 +1064,62 @@ const DispatchProgressRing = {
   }
 };
 
+// ── Persistent Local Storage for 0ms Instant Cold Starts ──
+const DISPATCH_CACHE_KEY = 'topview_dispatch_cache';
+
+const DispatchStorage = {
+  load() {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      const raw = localStorage.getItem(DISPATCH_CACHE_KEY);
+      if (!raw) return null;
+      const cached = JSON.parse(raw);
+      const todayStr = new Date().toDateString();
+      if (cached && cached.dateKey === todayStr && Array.isArray(cached.records) && cached.records.length > 0) {
+        return cached;
+      }
+    } catch(e) {
+      console.warn('[DispatchStorage] Load cache failed:', e);
+    }
+    return null;
+  },
+  save(records, lastSync) {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const todayStr = new Date().toDateString();
+      const payload = {
+        dateKey: todayStr,
+        lastSync: lastSync || Date.now(),
+        records: records || []
+      };
+      localStorage.setItem(DISPATCH_CACHE_KEY, JSON.stringify(payload));
+    } catch(e) {
+      console.warn('[DispatchStorage] Save cache failed:', e);
+    }
+  }
+};
+
 let portalSessionCookie = (typeof localStorage !== 'undefined') ? localStorage.getItem('portal_session_cookie') : null;
 let portalData = [];
 let portalLastSync = 0; // Timestamp of last successful dispatch sync
+
+// Instant cold-start hydration (0ms wait)
+const cachedDispatch = DispatchStorage.load();
+if (cachedDispatch) {
+  portalData = cachedDispatch.records;
+  portalLastSync = cachedDispatch.lastSync;
+  console.log(`[Dispatch] Hydrated ${portalData.length} records from local cache for today (0ms cold start)`);
+  setTimeout(() => {
+    const uniqueBuses = new Set(portalData.map(r => DispatchEngine.normalizeBusId(r.bus)).filter(Boolean));
+    const countEl = document.getElementById('portal-results-count');
+    if (countEl) countEl.textContent = `${uniqueBuses.size}`;
+    const lastSyncEl = document.getElementById('portal-last-sync-time');
+    if (lastSyncEl && portalLastSync) {
+      lastSyncEl.textContent = new Date(portalLastSync).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+    renderPortalResults(portalData, 'Live Feed');
+  }, 50);
+}
 
 async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
   const refreshBtn = document.getElementById('btn-portal-refresh');
@@ -1093,7 +1146,9 @@ async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
     try {
       const cookieParam = portalSessionCookie ? `cookie=${encodeURIComponent(portalSessionCookie)}&` : '';
       const limitParam = 'limit=500';
-      result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?${cookieParam}${limitParam}`, 'GET');
+      // Delta sync parameter if we already have records
+      const sinceParam = (portalData && portalData.length > 0 && portalLastSync > 0) ? `&since=${portalLastSync}` : '';
+      result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?${cookieParam}${limitParam}${sinceParam}`, 'GET');
     } catch(fetchErr) {
       DispatchLogger.log(`Direct fetch failed: ${fetchErr.message}`, 'warn');
       result = { success: false, message: fetchErr.message };
@@ -1116,7 +1171,8 @@ async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
             DispatchProgressRing.setStep(2, 'complete');
             DispatchProgressRing.setStep(3, 'active');
           }
-          result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}&limit=500`, 'GET');
+          const sinceParam = (portalData && portalData.length > 0 && portalLastSync > 0) ? `&since=${portalLastSync}` : '';
+          result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}&limit=500${sinceParam}`, 'GET');
         } else {
           throw new Error('Login credentials rejected.');
         }
@@ -1144,15 +1200,41 @@ async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
           localStorage.setItem('portal_session_cookie', portalSessionCookie);
         }
       }
+
       const todayStr = new Date().toDateString();
-      const rawCount = (result.data || []).length;
-      portalData = (result.data || []).reverse().filter(record => {
-        if (!record.date) return false;
-        const recordDate = new Date(record.date);
-        return recordDate.toDateString() === todayStr;
-      });
+
+      if (result.isDelta) {
+        // Delta sync: merge new incoming records
+        const newIncoming = (result.data || []).reverse().filter(record => {
+          if (!record.date) return false;
+          return new Date(record.date).toDateString() === todayStr;
+        });
+
+        if (newIncoming.length > 0) {
+          const existingKeys = new Set(portalData.map(r => `${r.date}|${r.bus}|${r.stop}|${r.type}`));
+          const trulyNew = newIncoming.filter(r => !existingKeys.has(`${r.date}|${r.bus}|${r.stop}|${r.type}`));
+          if (trulyNew.length > 0) {
+            portalData = [...trulyNew, ...portalData];
+            DispatchLogger.log(`Delta sync merged ${trulyNew.length} new scans (total: ${portalData.length}).`, 'data');
+          } else {
+            DispatchLogger.log(`Delta sync: ${newIncoming.length} scans already in memory.`, 'info');
+          }
+        } else {
+          DispatchLogger.log('Delta sync: Up to date. No new scans.', 'info');
+        }
+      } else {
+        // Full dataset
+        const rawCount = (result.data || []).length;
+        portalData = (result.data || []).reverse().filter(record => {
+          if (!record.date) return false;
+          const recordDate = new Date(record.date);
+          return recordDate.toDateString() === todayStr;
+        });
+        DispatchLogger.log(`Downloaded ${rawCount} rows. Filtered ${portalData.length} records for today.`, 'data');
+      }
+
       portalLastSync = Date.now();
-      DispatchLogger.log(`Downloaded ${rawCount} rows. Filtered ${portalData.length} records for today.`, 'data');
+      DispatchStorage.save(portalData, portalLastSync);
 
       // Update Top 2-Metric Stats: Active Buses & Last Sync Time
       const uniqueBuses = new Set(portalData.map(r => DispatchEngine.normalizeBusId(r.bus)).filter(Boolean));
@@ -1233,11 +1315,45 @@ let dispatchAutoSyncTimer = null;
 function startDispatchAutoSync() {
   if (dispatchAutoSyncTimer) return;
   dispatchAutoSyncTimer = setInterval(() => {
-    if (portalSessionCookie) {
-      fetchDispatchData('Data', true);
-    }
+    fetchDispatchData('Auto-Sync', true);
   }, 15000); // 15 seconds
 }
+
+// ── App Lifecycle Resume Listener (Instant Refresh on App Focus/Unlock) ──
+function setupAppResumeListener() {
+  const triggerResumeSync = () => {
+    if (Date.now() - portalLastSync > 15000) {
+      console.log('[Dispatch] App resumed. Refreshing dispatch feed in background...');
+      fetchDispatchData('Resume Sync', true);
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      triggerResumeSync();
+    }
+  });
+
+  window.addEventListener('focus', triggerResumeSync);
+
+  try {
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+      window.Capacitor.Plugins.App.addListener('appStateChange', (state) => {
+        if (state && state.isActive) {
+          triggerResumeSync();
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('[Dispatch] Capacitor App listener note:', e.message);
+  }
+}
+setupAppResumeListener();
+
+// Trigger immediate background pre-fetch on application boot
+setTimeout(() => {
+  fetchDispatchData('App Launch Pre-fetch', true);
+}, 300);
 
 // Keep Render backend awake 24/7 (ping every 4 minutes)
 setInterval(() => {
@@ -1429,12 +1545,19 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
     return;
   }
 
-  // Handle "Show All" Expand Toggle
-  const displayRecords = portalShowAll ? records : records.slice(0, 5);
+  // Handle Chunked Virtualization (Fast 60/120 FPS Rendering)
+  const displayLimit = portalShowAll ? portalVisibleCount : 5;
+  const displayRecords = records.slice(0, displayLimit);
   if (toggleBtn) {
     if (records.length > 5) {
       toggleBtn.style.display = 'block';
-      toggleBtn.textContent = portalShowAll ? `Show Top 5 (of ${records.length})` : `Show All (${records.length} Entries)`;
+      if (!portalShowAll) {
+        toggleBtn.textContent = `Show More (${records.length} Total Entries)`;
+      } else if (displayLimit < records.length) {
+        toggleBtn.textContent = `Load Next 25 (Showing ${displayLimit} of ${records.length})`;
+      } else {
+        toggleBtn.textContent = `Collapse (Showing All ${records.length})`;
+      }
     } else {
       toggleBtn.style.display = 'none';
     }
@@ -1584,12 +1707,18 @@ function clearPortalFilter() {
 }
 
 // ── Event Listeners ──
+let portalVisibleCount = 25;
+
 const btnFilterBus = document.getElementById('btn-portal-filter-bus');
 if (btnFilterBus) btnFilterBus.addEventListener('click', applyInlineBusFilter);
 
 const inputBus = document.getElementById('portal-input-bus');
 if (inputBus) {
-  inputBus.addEventListener('input', () => applyInlineBusFilter());
+  let busDebounce = null;
+  inputBus.addEventListener('input', () => {
+    clearTimeout(busDebounce);
+    busDebounce = setTimeout(() => applyInlineBusFilter(), 40);
+  });
   inputBus.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') applyInlineBusFilter();
   });
@@ -1600,7 +1729,11 @@ if (btnFilterStop) btnFilterStop.addEventListener('click', applyInlineStopFilter
 
 const inputStop = document.getElementById('portal-input-stop');
 if (inputStop) {
-  inputStop.addEventListener('input', () => applyInlineStopFilter());
+  let stopDebounce = null;
+  inputStop.addEventListener('input', () => {
+    clearTimeout(stopDebounce);
+    stopDebounce = setTimeout(() => applyInlineStopFilter(), 40);
+  });
   inputStop.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') applyInlineStopFilter();
   });
@@ -1612,7 +1745,15 @@ if (btnClearFilter) btnClearFilter.addEventListener('click', clearPortalFilter);
 const btnToggleAll = document.getElementById('btn-portal-toggle-all');
 if (btnToggleAll) {
   btnToggleAll.addEventListener('click', () => {
-    portalShowAll = !portalShowAll;
+    if (!portalShowAll) {
+      portalShowAll = true;
+      portalVisibleCount = 25;
+    } else if (portalVisibleCount < currentPortalFilterMatches.length) {
+      portalVisibleCount += 25;
+    } else {
+      portalShowAll = false;
+      portalVisibleCount = 25;
+    }
     renderPortalResults(currentPortalFilterMatches, currentPortalFilterLabel, currentPortalFilterOptions);
   });
 }
