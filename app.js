@@ -472,6 +472,8 @@ async function runFleetScan() {
 // COUNTIF CONNECT MODULE
 // ============================================================
 
+let lastDispatchModalToggleTime = 0;
+
 function updateFloatingDispatchPill(isOpen) {
   const pill = document.getElementById('floating-dispatch-pill');
   const text = document.getElementById('floating-dispatch-text');
@@ -489,6 +491,10 @@ function updateFloatingDispatchPill(isOpen) {
 }
 
 function openDispatchOverlayModal() {
+  const now = Date.now();
+  if (now - lastDispatchModalToggleTime < 350) return;
+  lastDispatchModalToggleTime = now;
+
   const modal = document.getElementById('dispatch-overlay-modal');
   const body = document.getElementById('dispatch-overlay-body');
   const setupEl = document.getElementById('countif-setup');
@@ -515,6 +521,10 @@ function openDispatchOverlayModal() {
 }
 
 function closeDispatchOverlayModal() {
+  const now = Date.now();
+  if (now - lastDispatchModalToggleTime < 350) return;
+  lastDispatchModalToggleTime = now;
+
   const modal = document.getElementById('dispatch-overlay-modal');
   if (modal) modal.classList.remove('active');
   
@@ -532,13 +542,19 @@ function closeDispatchOverlayModal() {
 
 const closeOverlayBtn = document.getElementById('btn-close-dispatch-overlay');
 if (closeOverlayBtn) {
-  closeOverlayBtn.addEventListener('click', closeDispatchOverlayModal);
+  closeOverlayBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    closeDispatchOverlayModal();
+  });
 }
 
 const dispatchModalEl = document.getElementById('dispatch-overlay-modal');
 if (dispatchModalEl) {
   dispatchModalEl.addEventListener('click', (e) => {
     if (e.target === dispatchModalEl) {
+      e.stopPropagation();
+      e.preventDefault();
       closeDispatchOverlayModal();
     }
   });
@@ -2186,13 +2202,16 @@ document.querySelectorAll('.hud-shortcut').forEach(btn => {
   });
 });
 
-// Floating Pill Drag & Toggle Logic
+// Floating Pill Drag & Toggle Logic (Hardware-Accelerated 60/120 FPS Pointer Events)
 const dispatchPill = document.getElementById('floating-dispatch-pill');
 if (dispatchPill) {
   let isDragging = false;
   let hasMoved = false;
-  let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
-  let touchStartTime = 0;
+  let startX = 0, startY = 0;
+  let currentTranslateX = 0, currentTranslateY = 0;
+  let dragStartX = 0, dragStartY = 0;
+  let activePointerId = null;
+  let rafPending = false;
 
   const toggleDispatchModal = () => {
     const modal = document.getElementById('dispatch-overlay-modal');
@@ -2203,55 +2222,100 @@ if (dispatchPill) {
     }
   };
 
-  const onStart = (e) => {
+  const onPointerDown = (e) => {
+    if (!e.isPrimary) return;
+    if (e.button !== undefined && e.button !== 0) return;
+
     isDragging = true;
     hasMoved = false;
-    touchStartTime = Date.now();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    startX = clientX;
-    startY = clientY;
-    const rect = dispatchPill.getBoundingClientRect();
-    initialLeft = rect.left;
-    initialTop = rect.top;
+    activePointerId = e.pointerId;
+    startX = e.clientX;
+    startY = e.clientY;
+    dragStartX = currentTranslateX;
+    dragStartY = currentTranslateY;
+
+    try {
+      dispatchPill.setPointerCapture(e.pointerId);
+    } catch (_) {}
   };
 
-  const onMove = (e) => {
-    if (!isDragging) return;
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const dx = clientX - startX;
-    const dy = clientY - startY;
-    
-    // Only engage drag move if moved more than 10px
-    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+  const onPointerMove = (e) => {
+    if (!isDragging || e.pointerId !== activePointerId) return;
+
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+
+    // Movement threshold to distinguish tap from drag (6px)
+    if (!hasMoved && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
       hasMoved = true;
-      dispatchPill.style.bottom = 'auto';
-      dispatchPill.style.right = 'auto';
-      dispatchPill.style.left = (initialLeft + dx) + 'px';
-      dispatchPill.style.top = (initialTop + dy) + 'px';
+      dispatchPill.classList.add('is-dragging');
+    }
+
+    if (hasMoved) {
+      currentTranslateX = dragStartX + dx;
+      currentTranslateY = dragStartY + dy;
+
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(() => {
+          dispatchPill.style.transform = `translate3d(${currentTranslateX}px, ${currentTranslateY}px, 0)`;
+          rafPending = false;
+        });
+      }
     }
   };
 
-  const onEnd = (e) => {
-    if (!isDragging) return;
+  const onPointerUp = (e) => {
+    if (!isDragging || e.pointerId !== activePointerId) return;
     isDragging = false;
-    const elapsed = Date.now() - touchStartTime;
-    // If finger was lifted without moving (< 10px) or was a quick tap (< 350ms)
-    if (!hasMoved || elapsed < 300) {
+    activePointerId = null;
+
+    try {
+      dispatchPill.releasePointerCapture(e.pointerId);
+    } catch (_) {}
+
+    dispatchPill.classList.remove('is-dragging');
+
+    if (!hasMoved) {
+      // Clean, instant tap
       toggleDispatchModal();
+    } else {
+      // Viewport safety clamping so it never leaves the screen
+      const rect = dispatchPill.getBoundingClientRect();
+      const padding = 10;
+      let adjustX = 0;
+      let adjustY = 0;
+
+      if (rect.left < padding) adjustX = padding - rect.left;
+      if (rect.right > window.innerWidth - padding) adjustX = (window.innerWidth - padding) - rect.right;
+      if (rect.top < padding) adjustY = padding - rect.top;
+      if (rect.bottom > window.innerHeight - padding) adjustY = (window.innerHeight - padding) - rect.bottom;
+
+      if (adjustX !== 0 || adjustY !== 0) {
+        currentTranslateX += adjustX;
+        currentTranslateY += adjustY;
+        dispatchPill.style.transform = `translate3d(${currentTranslateX}px, ${currentTranslateY}px, 0)`;
+      }
     }
   };
 
-  // Mouse events
-  dispatchPill.addEventListener('mousedown', onStart);
-  window.addEventListener('mousemove', onMove);
-  window.addEventListener('mouseup', onEnd);
+  const onPointerCancel = (e) => {
+    if (e.pointerId !== activePointerId) return;
+    isDragging = false;
+    activePointerId = null;
+    dispatchPill.classList.remove('is-dragging');
+  };
 
-  // Touch events (iOS / Android)
-  dispatchPill.addEventListener('touchstart', onStart, { passive: true });
-  window.addEventListener('touchmove', onMove, { passive: true });
-  window.addEventListener('touchend', onEnd);
+  dispatchPill.addEventListener('pointerdown', onPointerDown);
+  dispatchPill.addEventListener('pointermove', onPointerMove);
+  dispatchPill.addEventListener('pointerup', onPointerUp);
+  dispatchPill.addEventListener('pointercancel', onPointerCancel);
+
+  // Prevent synthetic click bubbling
+  dispatchPill.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
 }
 
 document.getElementById('btn-copy-all-report').addEventListener('click', () => {

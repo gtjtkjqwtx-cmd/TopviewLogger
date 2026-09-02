@@ -1338,12 +1338,54 @@ button:active { transform: scale(.92) !important; background: rgba(255,255,255,0
   color: white !important;
 }
 
-/* ── Floating Dispatch Pill Toggle State ── */
+/* ── Floating Dispatch Pill (Hardware-Accelerated 60/120 FPS Drag) ── */
+#floating-dispatch-pill {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+  background: #0e2719;
+  background: rgba(14, 39, 25, 0.95);
+  border: 1px solid rgba(46, 204, 113, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 8px 14px;
+  border-radius: 50px;
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  color: var(--green);
+  font-size: 0.75rem;
+  font-weight: 700;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none; /* Prevents mobile scroll gesture interference */
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#floating-dispatch-pill.is-dragging {
+  cursor: grabbing !important;
+  transition: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #0e2719 !important;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.6) !important;
+}
+
 #floating-dispatch-pill.modal-open {
   background: rgba(30, 15, 15, 0.95) !important;
   border-color: rgba(231, 76, 60, 0.4) !important;
   color: #e74c3c !important;
 }
+
+#floating-dispatch-pill.modal-open.is-dragging {
+  background: #230f0f !important;
+}
+
 #floating-dispatch-pill.modal-open .status-dot {
   background: #e74c3c !important;
 }
