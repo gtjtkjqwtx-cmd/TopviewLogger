@@ -27,6 +27,7 @@
     <symbol id="icon-bus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6v6"/><path d="M16 6v6"/><path d="M2 12h20"/><path d="M18 18H6a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v7a4 4 0 0 1-4 4z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
     <symbol id="icon-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
     <symbol id="icon-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></symbol>
+    <symbol id="icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></symbol>
     <symbol id="icon-navigation" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></symbol>
     <symbol id="icon-boat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2-1a2.4 2.4 0 0 1 2-1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2-1a2.4 2.4 0 0 1 2-1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2-1"/><path d="M3 17l1.5-6h15L21 17"/><path d="M6 11V7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="10" y1="8" x2="14" y2="8"/></symbol>
     <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
@@ -99,7 +100,43 @@
     <div class="container container-medium">
       <header class="view-header">
         <h1 id="menu-welcome">Welcome</h1>
-        <p class="subtitle">Choose a report type</p>
+        <p class="subtitle">Choose a category</p>
+      </header>
+      <div class="button-stack">
+        <button id="btn-goto-reports-menu" class="btn-primary" style="gap:.75rem;">
+          <svg class="icon-sm" style="fill: var(--green);"><use href="#icon-bus"/></svg>
+          <span>Reports</span>
+          <div class="gloss-sheen"></div>
+        </button>
+
+        <button id="btn-goto-other-menu" class="btn-primary" style="gap:.75rem;">
+          <svg class="icon-sm" style="fill: #3498db;"><use href="#icon-folder"/></svg>
+          <span>Other</span>
+          <div class="gloss-sheen"></div>
+        </button>
+
+        <div style="text-align:center; font-size: 0.65rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 2px; margin-top: 1.25rem;">- Forms -</div>
+        <div style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap; margin:0.5rem 0;">
+          <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://docs.google.com/forms/d/e/1FAIpQLSdlcMExtKCdKrDjad4B4Rq1y4phVHG5nSJhY_seBxKgbQBSYw/viewform">Stopwatch</button>
+          <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://docs.google.com/forms/d/e/1FAIpQLSfc97vaKGcC6Ijdjer5fyQ2M3qN93scHiBGDRWtD_gYhU1ROw/viewform">Full Loop</button>
+          <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://docs.google.com/forms/d/e/1FAIpQLScBb6QmvpC1LcDZnxf8IKMP388XwmDMJCF811M1kx1TOkmcwA/viewform">Night Tour</button>
+          <button class="violation-btn-sm hud-shortcut" style="display:none; flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://www.countif.net">Dispatch</button>
+        </div>
+        <button id="btn-menu-logout" class="btn-tertiary"><span>Sign Out</span></button>
+      </div>
+      <div class="storage-info">
+        <div class="offline-badge">Offline Storage Active</div>
+        <span id="menu-storage-count">0 reports saved locally</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ REPORTS SUBMENU VIEW ============ -->
+  <main id="reports-menu-view" class="view">
+    <div class="container container-medium">
+      <header class="view-header-row" style="margin-bottom: 2rem;">
+        <button class="icon-btn-sm btn-back" data-target="menu"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
+        <h2>Reports</h2>
       </header>
       <div class="button-stack">
         <button id="btn-goto-fullloop" class="btn-primary" style="gap:.75rem;">
@@ -117,6 +154,19 @@
           <span>Liberty Cruise</span>
           <div class="gloss-sheen"></div>
         </button>
+        <button class="btn-tertiary btn-back" data-target="menu"><span>← Back to Menu</span></button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ OTHER SUBMENU VIEW ============ -->
+  <main id="other-menu-view" class="view">
+    <div class="container container-medium">
+      <header class="view-header-row" style="margin-bottom: 2rem;">
+        <button class="icon-btn-sm btn-back" data-target="menu"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
+        <h2>Other</h2>
+      </header>
+      <div class="button-stack">
         <button id="btn-goto-global-notes" class="btn-primary" style="gap:.75rem;">
           <svg class="icon-sm"><use href="#icon-clipboard"/></svg>
           <span>Notes</span>
@@ -127,23 +177,165 @@
           <span>Samsara Map</span>
           <div class="gloss-sheen"></div>
         </button>
+        <button id="btn-goto-speedometer" class="btn-primary" style="gap:.75rem;">
+          <svg class="icon-sm" style="fill: #e67e22;"><use href="#icon-clock"/></svg>
+          <span>Speedometer</span>
+          <div class="gloss-sheen"></div>
+        </button>
         <button id="btn-experiment" class="btn-primary" style="display:none; gap:.75rem;">
           <svg class="icon-sm"><use href="#icon-folder"/></svg>
           <span>Dispatch Report</span>
           <div class="gloss-sheen"></div>
         </button>
-        <div style="text-align:center; font-size: 0.65rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 2px; margin-top: 1rem;">- Forms -</div>
-        <div style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap; margin:0.5rem 0;">
-          <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://docs.google.com/forms/d/e/1FAIpQLSdlcMExtKCdKrDjad4B4Rq1y4phVHG5nSJhY_seBxKgbQBSYw/viewform">Stopwatch</button>
-          <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://docs.google.com/forms/d/e/1FAIpQLSfc97vaKGcC6Ijdjer5fyQ2M3qN93scHiBGDRWtD_gYhU1ROw/viewform">Full Loop</button>
-          <button class="violation-btn-sm hud-shortcut" style="flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://docs.google.com/forms/d/e/1FAIpQLScBb6QmvpC1LcDZnxf8IKMP388XwmDMJCF811M1kx1TOkmcwA/viewform">Night Tour</button>
-          <button class="violation-btn-sm hud-shortcut" style="display:none; flex:1; min-width:70px; height:36px; font-size:.65rem;" data-url="https://www.countif.net">Dispatch</button>
-        </div>
-        <button id="btn-menu-logout" class="btn-tertiary"><span>Sign Out</span></button>
+        <button class="btn-tertiary btn-back" data-target="menu"><span>← Back to Menu</span></button>
       </div>
-      <div class="storage-info">
-        <div class="offline-badge">Offline Storage Active</div>
-        <span id="menu-storage-count">0 reports saved locally</span>
+    </div>
+  </main>
+
+  <!-- ============ SPEEDOMETER VIEW ============ -->
+  <main id="speedometer-view" class="view">
+    <div class="container container-medium">
+      <!-- Header Row -->
+      <header class="view-header-row" style="margin-bottom: 1.25rem;">
+        <button class="icon-btn-sm btn-back" data-target="other-menu"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
+        <h2>Speedometer</h2>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span id="speedo-wakelock-badge" class="pill-badge" style="background: rgba(46, 204, 113, 0.1); border: 1px solid rgba(46, 204, 113, 0.25); color: #2ecc71; font-size: 0.62rem; font-weight: 700; padding: 3px 8px;">
+            ⚡ Screen Awake
+          </span>
+          <span id="speedo-gps-badge" class="pill-badge" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.7); font-size: 0.62rem; font-weight: 700; padding: 3px 8px;">
+            GPS: Wait
+          </span>
+        </div>
+      </header>
+
+      <!-- GAUGE CARD (Option C Hybrid Radial Arc + Digital Center) -->
+      <div id="speedo-gauge-card" class="speedo-card" style="text-align: center; position: relative; overflow: hidden;">
+        <!-- Overspeed Banner (Flashes when > 20 MPH) -->
+        <div id="speedo-overspeed-banner" class="speedo-warning-banner" style="display: none;">
+          <svg class="icon-xs" style="fill: #fff;"><use href="#icon-close"/></svg>
+          <span>OVERSPEED WARNING: EXCEEDING 20 MPH LIMIT</span>
+        </div>
+
+        <div class="speedo-arc-container">
+          <svg class="speedo-svg" viewBox="0 0 240 150">
+            <defs>
+              <linearGradient id="speedoGradNormal" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#27ae60"/>
+                <stop offset="65%" stop-color="#2ecc71"/>
+                <stop offset="100%" stop-color="#f1c40f"/>
+              </linearGradient>
+              <linearGradient id="speedoGradAlert" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#e67e22"/>
+                <stop offset="50%" stop-color="#e74c3c"/>
+                <stop offset="100%" stop-color="#ff3838"/>
+              </linearGradient>
+              <filter id="speedoGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+              </filter>
+            </defs>
+
+            <!-- Background Track Arc (Radius 85, Arc length 267) -->
+            <path class="speedo-track" d="M 35 130 A 85 85 0 0 1 205 130" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="14" stroke-linecap="round"/>
+            
+            <!-- Active Fill Arc -->
+            <path id="speedo-active-arc" class="speedo-fill" d="M 35 130 A 85 85 0 0 1 205 130" fill="none" stroke="url(#speedoGradNormal)" stroke-width="14" stroke-linecap="round" stroke-dasharray="267" stroke-dashoffset="267" filter="url(#speedoGlow)"/>
+
+            <!-- Speed Limit Tick (20 MPH mark) -->
+            <line x1="91" y1="52" x2="88" y2="40" stroke="#f1c40f" stroke-width="2.5" stroke-linecap="round"/>
+            <text x="84" y="34" fill="#f1c40f" font-size="8" font-weight="800" text-anchor="middle">20</text>
+            <text x="35" y="145" fill="rgba(255,255,255,0.4)" font-size="8" font-weight="700" text-anchor="middle">0</text>
+            <text x="205" y="145" fill="rgba(255,255,255,0.4)" font-size="8" font-weight="700" text-anchor="middle">60</text>
+          </svg>
+
+          <!-- Center Digital HUD readout -->
+          <div class="speedo-digital-center">
+            <div id="speedo-readout-speed" class="speedo-huge-num">0.0</div>
+            <div class="speedo-unit-label">MPH</div>
+            <div id="speedo-limit-badge" class="speedo-pill-limit">LIMIT: 20 MPH</div>
+          </div>
+        </div>
+
+        <!-- Live Location Strip -->
+        <div class="speedo-location-bar">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              <span class="pulse" style="width: 7px; height: 7px; flex-shrink: 0;"></span>
+              <span id="speedo-nearest-stop" style="font-size: 0.82rem; font-weight: 700; color: #fff;">Acquiring GPS location...</span>
+            </div>
+            <div id="speedo-distance" style="font-size: 0.76rem; font-weight: 700; color: var(--green); font-family: monospace; flex-shrink: 0;">-- mi away</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4-METRICS HUD GRID -->
+      <div class="speedo-metrics-grid">
+        <div class="speedo-metric-tile">
+          <span class="speedo-metric-label">MAX SPEED</span>
+          <span id="speedo-metric-max" class="speedo-metric-val">0.0 <small style="font-size:0.65rem;">MPH</small></span>
+        </div>
+        <div class="speedo-metric-tile">
+          <span class="speedo-metric-label">AVG SPEED</span>
+          <span id="speedo-metric-avg" class="speedo-metric-val">0.0 <small style="font-size:0.65rem;">MPH</small></span>
+        </div>
+        <div class="speedo-metric-tile">
+          <span class="speedo-metric-label">>20 MPH DURATION</span>
+          <span id="speedo-metric-speeding" class="speedo-metric-val" style="color: #f1c40f;">00:00</span>
+        </div>
+        <div class="speedo-metric-tile">
+          <span class="speedo-metric-label">TOTAL TIME</span>
+          <span id="speedo-metric-time" class="speedo-metric-val">00:00</span>
+        </div>
+      </div>
+
+      <!-- CONTROLS ROW (Start and Finish Only) -->
+      <div class="speedo-controls-row" style="display: flex; gap: 0.6rem; margin-bottom: 1.25rem;">
+        <button id="btn-speedo-start" class="btn-primary speedo-ctrl-btn" style="flex: 2; background: #2ecc71; color: #000; padding: 1rem; font-size: 0.95rem;">
+          <svg class="icon-sm" style="fill: #000;"><use href="#icon-clock"/></svg>
+          <span id="speedo-start-text">Start</span>
+        </button>
+        <button id="btn-speedo-finish" class="btn-secondary speedo-ctrl-btn" style="flex: 2; color: #f1c40f; padding: 1rem; font-size: 0.95rem;" disabled>
+          <span>⏹ Finish</span>
+        </button>
+        <button id="btn-speedo-reset" class="icon-btn-sm" style="width: 48px; height: 48px; border-radius: 12px; margin: 0; flex-shrink: 0;" title="Reset Run">
+          <svg class="icon-xs"><use href="#icon-close"/></svg>
+        </button>
+      </div>
+
+      <!-- ACTIVE RECORDING STATUS CARD -->
+      <div id="speedo-active-session-card" class="speedo-card" style="display: none; padding: 0.85rem 1rem; margin-bottom: 1.25rem; background: rgba(46, 204, 113, 0.05); border-color: rgba(46, 204, 113, 0.25);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <div style="display:flex; align-items:center; gap: 6px;">
+            <span class="live-indicator-sm" style="padding: 2px 6px; font-size: 0.58rem;"><div class="pulse"></div> RECORDING SPEED</span>
+          </div>
+          <span id="speedo-live-timer" style="font-size: 1.1rem; font-weight: 800; font-family: monospace; color: var(--green);">00:00</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: rgba(255,255,255,0.7); flex-wrap: wrap; gap: 4px;">
+          <span id="speedo-live-start-loc">Start: --</span>
+          <span id="speedo-live-start-time">Time: --</span>
+        </div>
+      </div>
+
+      <!-- SAVED SPEED RUNS LOGS -->
+      <div class="speedo-card" style="margin-bottom: 2rem;">
+        <div class="section-title-row" style="margin-bottom: 0.75rem;">
+          <div style="display:flex; align-items:center; gap: 6px;">
+            <svg class="icon-xs" style="fill: #f1c40f;"><use href="#icon-folder"/></svg>
+            <h3 class="section-title" style="margin: 0; font-size: 0.78rem;">Saved Speed Runs</h3>
+          </div>
+          <button id="btn-clear-speedo-logs" class="icon-btn-sm" style="margin:0; font-size: 0.65rem; width: auto; height: 26px; padding: 4px 8px;" title="Clear All Saved Runs">
+            <span>Clear</span>
+          </button>
+        </div>
+        <div id="speedo-saved-runs-list" style="display: flex; flex-direction: column; gap: 0.6rem;">
+          <div style="text-align: center; padding: 1.5rem 0.5rem; color: rgba(255,255,255,0.35); font-size: 0.75rem;">No saved speed runs yet. Finished runs will appear here.</div>
+        </div>
+      </div>
+
+      <!-- Bottom return button -->
+      <div style="text-align: center; margin-bottom: 2rem;">
+        <button class="btn-tertiary btn-back" data-target="other-menu"><span>← Back to Other Menu</span></button>
       </div>
     </div>
   </main>
@@ -1094,6 +1286,36 @@
     </div>
   </div>
 
+</div>
+
+<!-- Modal: Send Speed Note to Report -->
+<div id="speedo-send-modal" class="modal-overlay">
+  <div class="modal-card" style="max-width: 360px; background: #121820; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 1.25rem;">
+    <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+      <h3 style="font-size: 0.95rem; font-weight: 800; color: #fff; margin:0;">Send Note to Report</h3>
+      <button id="btn-close-speedo-modal" class="icon-btn-sm" style="margin:0;"><svg class="icon-xs"><use href="#icon-close"/></svg></button>
+    </div>
+    <div id="speedo-send-modal-preview" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 0.75rem; font-size: 0.72rem; color: #2ecc71; font-family: monospace; word-break: break-all; margin-bottom: 1rem;">
+      <!-- preview note -->
+    </div>
+    <div style="font-size: 0.72rem; color: rgba(255,255,255,0.6); margin-bottom: 0.6rem; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">
+      Attach note to:
+    </div>
+    <div style="display:flex; flex-direction:column; gap:0.6rem; margin-bottom: 0.5rem;">
+      <button class="btn-primary btn-attach-speed-report" data-target-report="fl" style="justify-content: flex-start; gap: 10px; font-size: 0.85rem;">
+        <svg class="icon-sm" style="fill: var(--green);"><use href="#icon-bus"/></svg>
+        <span>Full Loop Report</span>
+      </button>
+      <button class="btn-primary btn-attach-speed-report" data-target-report="sw" style="justify-content: flex-start; gap: 10px; font-size: 0.85rem;">
+        <svg class="icon-sm" style="fill: #3498db;"><use href="#icon-clock"/></svg>
+        <span>Stopwatch Report</span>
+      </button>
+      <button class="btn-primary btn-attach-speed-report" data-target-report="lc" style="justify-content: flex-start; gap: 10px; font-size: 0.85rem;">
+        <svg class="icon-sm" style="fill: #e67e22;"><use href="#icon-boat"/></svg>
+        <span>Liberty Cruise</span>
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- Floating Toast Notification -->

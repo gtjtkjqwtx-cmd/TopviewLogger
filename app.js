@@ -153,6 +153,8 @@ function showView(targetId) {
   
   if (targetId === 'sw-dashboard') checkSwResume();
   if (targetId === 'fl-dashboard') checkFlResume();
+  if (targetId === 'speedometer' && window.SpeedometerEngine) window.SpeedometerEngine.start();
+  if (targetId !== 'speedometer' && window.SpeedometerEngine) window.SpeedometerEngine.stop();
   if (typeof refreshAllLoginsOnEntry === 'function' && targetId !== 'login') {
     refreshAllLoginsOnEntry(true);
   }
@@ -347,9 +349,13 @@ if (loginBtn) {
 })();
 
 // ===== MENU =====
-document.getElementById('btn-goto-stopwatch').addEventListener('click', () => { State.activeModule = 'sw'; checkSwResume(); swRenderHistory(); showView('sw-dashboard'); });
-document.getElementById('btn-goto-fullloop').addEventListener('click', () => { State.activeModule = 'fl'; checkFlResume(); flRenderHistory(); showView('fl-dashboard'); });
-document.getElementById('btn-goto-liberty').addEventListener('click', () => { State.activeModule = 'lc'; checkLcResume(); lcRenderHistory(); showView('lc-dashboard'); });
+document.getElementById('btn-goto-reports-menu')?.addEventListener('click', () => showView('reports-menu'));
+document.getElementById('btn-goto-other-menu')?.addEventListener('click', () => showView('other-menu'));
+document.getElementById('btn-goto-speedometer')?.addEventListener('click', () => showView('speedometer'));
+
+document.getElementById('btn-goto-stopwatch')?.addEventListener('click', () => { State.activeModule = 'sw'; checkSwResume(); swRenderHistory(); showView('sw-dashboard'); });
+document.getElementById('btn-goto-fullloop')?.addEventListener('click', () => { State.activeModule = 'fl'; checkFlResume(); flRenderHistory(); showView('fl-dashboard'); });
+document.getElementById('btn-goto-liberty')?.addEventListener('click', () => { State.activeModule = 'lc'; checkLcResume(); lcRenderHistory(); showView('lc-dashboard'); });
 
 // ===== TRACKER MODULE =====
 const DEFAULTS = {
@@ -385,7 +391,7 @@ function openTrackerMapAndScan() {
 }
 
 // UI Reactive logic for Default API checkbox (Removed to match minimal UI)
-document.getElementById('btn-goto-tracker').addEventListener('click', () => { 
+document.getElementById('btn-goto-tracker')?.addEventListener('click', () => { 
   openTrackerMapAndScan();
 });
 
@@ -4095,3 +4101,673 @@ window.addEventListener('beforeinput', (e) => {
     e.preventDefault();
   }
 });
+
+// ============================================================
+// SPEEDOMETER & SPEED AUDITOR ENGINE (Enhanced GPS & Send Note)
+// ============================================================
+window.SpeedometerEngine = {
+  watchId: null,
+  wakeLockSentinel: null,
+  stops: [],
+  isTracking: false,
+  isPaused: false,
+  
+  // Session Stats
+  sessionStartTime: null,
+  timerInterval: null,
+  currentSpeed: 0,
+  maxSpeed: 0,
+  speedReadings: [],
+  totalSpeedingMs: 0,
+  lastTickTime: null,
+  startLocation: null,
+  startTimeStr: null,
+  
+  // Speeding Interval Tracking
+  speedingStartTimeStr: null,
+  speedingEndTimeStr: null,
+  speedingStartStop: null,
+  speedingEndStop: null,
+
+  // Location
+  currentCoords: null,
+  nearestStopClean: 'Locating...',
+  nearestStopDistMiles: null,
+  
+  // Pending Note for Modal
+  pendingNoteText: null,
+
+  // Storage
+  STORAGE_KEY: 'topview_speedometer_logs',
+  savedRuns: [],
+
+  async init() {
+    this.loadSavedRuns();
+    await this.loadStops();
+    this.bindEvents();
+    this.renderSavedRuns();
+  },
+
+  async loadStops() {
+    if (this.stops.length > 0) return;
+    try {
+      const res = await fetch('stops_data.json');
+      if (res.ok) {
+        this.stops = await res.json();
+      }
+    } catch(e) {
+      console.warn('[Speedometer] Could not load stops_data.json:', e.message);
+    }
+  },
+
+  cleanStopName(name) {
+    if (!name) return 'Stop';
+    return name.replace(/^(At|Near)\s+/i, '').replace(/\s*\([^)]*\)/g, '').trim();
+  },
+
+  findNearestStop(lat, lng) {
+    if (!this.stops || this.stops.length === 0) return null;
+    const R = 3958.8; // Radius in miles
+    let closest = null;
+    let minDist = Infinity;
+
+    for (const s of this.stops) {
+      if (typeof s.lat !== 'number' || typeof s.lng !== 'number') continue;
+      const dLat = (s.lat - lat) * Math.PI / 180;
+      const dLon = (s.lng - lng) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat * Math.PI / 180) * Math.cos(s.lat * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const dist = R * c;
+      if (dist < minDist) {
+        minDist = dist;
+        closest = s;
+      }
+    }
+
+    if (!closest) return null;
+    return {
+      stopName: closest.name,
+      distanceMiles: minDist
+    };
+  },
+
+  async requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        this.wakeLockSentinel = await navigator.wakeLock.request('screen');
+        const badge = document.getElementById('speedo-wakelock-badge');
+        if (badge) {
+          badge.style.display = 'inline-flex';
+          badge.textContent = '⚡ Screen Awake';
+        }
+        this.wakeLockSentinel.addEventListener('release', () => {
+          if (badge) badge.textContent = 'Screen Idle';
+        });
+      }
+    } catch(err) {
+      console.log('[Speedometer] WakeLock note:', err.message);
+    }
+  },
+
+  releaseWakeLock() {
+    if (this.wakeLockSentinel) {
+      this.wakeLockSentinel.release().catch(() => {});
+      this.wakeLockSentinel = null;
+    }
+  },
+
+  start() {
+    this.requestWakeLock();
+    this.startGpsWatch();
+    this.renderSavedRuns();
+  },
+
+  stop() {
+    this.releaseWakeLock();
+    if (this.watchId !== null) {
+      navigator.geolocation.clearWatch(this.watchId);
+      this.watchId = null;
+    }
+  },
+
+  startGpsWatch() {
+    if (this.watchId !== null) return;
+    if (!navigator.geolocation) {
+      const nearestEl = document.getElementById('speedo-nearest-stop');
+      if (nearestEl) nearestEl.textContent = 'Geolocation not supported';
+      return;
+    }
+
+    const gpsBadge = document.getElementById('speedo-gps-badge');
+    if (gpsBadge) gpsBadge.textContent = 'GPS: Connecting...';
+
+    let lastPos = null;
+    let lastPosTime = null;
+
+    this.watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const coords = pos.coords;
+        const now = Date.now();
+        this.currentCoords = coords;
+        const acc = Math.round(coords.accuracy || 0);
+
+        // GPS Accuracy Badge
+        if (gpsBadge) {
+          gpsBadge.textContent = `GPS: ±${acc}m`;
+          gpsBadge.style.color = acc <= 15 ? '#2ecc71' : (acc <= 35 ? '#f1c40f' : '#e74c3c');
+        }
+
+        // Nearest Stop & Distance in Miles
+        const stopInfo = this.findNearestStop(coords.latitude, coords.longitude);
+        const nearestEl = document.getElementById('speedo-nearest-stop');
+        const distEl = document.getElementById('speedo-distance');
+
+        if (stopInfo) {
+          this.nearestStopClean = stopInfo.stopName;
+          this.nearestStopDistMiles = stopInfo.distanceMiles;
+          if (nearestEl) nearestEl.textContent = stopInfo.stopName;
+          if (distEl) {
+            if (stopInfo.distanceMiles <= 0.05) {
+              distEl.textContent = 'At Stop';
+              distEl.style.color = 'var(--green)';
+            } else {
+              distEl.textContent = `${stopInfo.distanceMiles.toFixed(1)} mi away`;
+              distEl.style.color = 'var(--green)';
+            }
+          }
+        } else {
+          this.nearestStopClean = 'Locating...';
+          if (nearestEl) nearestEl.textContent = 'Acquiring GPS...';
+          if (distEl) distEl.textContent = '-- mi away';
+        }
+
+        // --- HIGH-PRECISION AUTOMOTIVE SPEED CALCULATION ---
+        let speedMph = 0;
+
+        // 1. If hardware speed is reported by device GPS chip:
+        if (typeof coords.speed === 'number' && !isNaN(coords.speed) && coords.speed >= 0) {
+          // Stationary deadband: < 0.6 m/s (~1.34 MPH) is walking/indoor drift -> snap to 0.0
+          if (coords.speed < 0.6) {
+            speedMph = 0;
+          } else {
+            speedMph = coords.speed * 2.23694;
+          }
+        } 
+        // 2. Fallback delta calculation (Only if hardware speed is null AND accuracy is reliable)
+        else if (lastPos && lastPosTime && acc <= 25 && lastPos.accuracy <= 25) {
+          const dtSeconds = (now - lastPosTime) / 1000;
+          if (dtSeconds >= 1.2) {
+            const dLat = (coords.latitude - lastPos.latitude) * Math.PI / 180;
+            const dLon = (coords.longitude - lastPos.longitude) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lastPos.latitude * Math.PI / 180) * Math.cos(coords.latitude * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const distMeters = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+            // CRITICAL ANTI-JITTER FILTER:
+            // If movement is smaller than the combined accuracy radius, it is pure GPS drift!
+            const uncertaintyThreshold = (acc + lastPos.accuracy) * 0.8;
+            if (distMeters > uncertaintyThreshold && distMeters > 15) {
+              const calcMph = (distMeters / dtSeconds) * 2.23694;
+              if (calcMph >= 2.5 && calcMph <= 85) {
+                speedMph = calcMph;
+              }
+            }
+          }
+        } else {
+          // Indoor or low accuracy with no hardware speed -> Stationary
+          speedMph = 0;
+        }
+
+        // Update tracking history position
+        if (!lastPos || (now - lastPosTime) >= 1500) {
+          lastPos = { latitude: coords.latitude, longitude: coords.longitude, accuracy: acc };
+          lastPosTime = now;
+        }
+
+        this.updateSpeed(speedMph);
+      },
+      (err) => {
+        console.warn('[Speedometer] GPS error:', err.message);
+        if (gpsBadge) {
+          gpsBadge.textContent = 'GPS: Offline';
+          gpsBadge.style.color = '#e74c3c';
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 15000
+      }
+    );
+  },
+
+  updateSpeed(targetSpeedMph) {
+    if (targetSpeedMph < 1.0) {
+      this.currentSpeed = 0;
+    } else {
+      // Smooth transitions (alpha = 0.5)
+      this.currentSpeed = Math.round((0.5 * targetSpeedMph + 0.5 * this.currentSpeed) * 10) / 10;
+    }
+
+    // Update gauge arc & colors
+    const arc = document.getElementById('speedo-active-arc');
+    const readout = document.getElementById('speedo-readout-speed');
+    const overspeedBanner = document.getElementById('speedo-overspeed-banner');
+    const card = document.getElementById('speedo-gauge-card');
+
+    const arcLength = 267;
+    const clampedSpeed = Math.min(this.currentSpeed, 60);
+    const offset = arcLength - (clampedSpeed / 60) * arcLength;
+
+    if (arc) arc.style.strokeDashoffset = offset;
+    if (readout) readout.textContent = this.currentSpeed.toFixed(1);
+
+    const isOverspeed = this.currentSpeed > 20;
+
+    if (isOverspeed) {
+      if (arc) arc.style.stroke = 'url(#speedoGradAlert)';
+      if (readout) readout.classList.add('overspeed');
+      if (card) card.classList.add('overspeed-active');
+      if (overspeedBanner) overspeedBanner.style.display = 'flex';
+
+      // Speeding interval tracking
+      const timeNowStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const currentStopName = this.cleanStopName(this.nearestStopClean);
+      if (!this.speedingStartTimeStr) {
+        this.speedingStartTimeStr = timeNowStr;
+        this.speedingStartStop = currentStopName;
+      }
+      this.speedingEndTimeStr = timeNowStr;
+      this.speedingEndStop = currentStopName;
+    } else {
+      if (arc) arc.style.stroke = 'url(#speedoGradNormal)';
+      if (readout) readout.classList.remove('overspeed');
+      if (card) card.classList.remove('overspeed-active');
+      if (overspeedBanner) overspeedBanner.style.display = 'none';
+    }
+
+    // Accumulate session stats if tracking
+    if (this.isTracking && !this.isPaused) {
+      if (this.currentSpeed > this.maxSpeed) {
+        this.maxSpeed = this.currentSpeed;
+        const maxEl = document.getElementById('speedo-metric-max');
+        if (maxEl) maxEl.innerHTML = `${this.maxSpeed.toFixed(1)} <small style="font-size:0.65rem;">MPH</small>`;
+      }
+
+      this.speedReadings.push(this.currentSpeed);
+      const avg = this.speedReadings.reduce((a,b) => a+b, 0) / this.speedReadings.length;
+      const avgEl = document.getElementById('speedo-metric-avg');
+      if (avgEl) avgEl.innerHTML = `${avg.toFixed(1)} <small style="font-size:0.65rem;">MPH</small>`;
+    }
+  },
+
+  startSpeedSession() {
+    this.isTracking = true;
+    this.isPaused = false;
+    this.sessionStartTime = Date.now();
+    this.lastTickTime = Date.now();
+    this.speedReadings = [];
+    this.totalSpeedingMs = 0;
+    this.maxSpeed = this.currentSpeed;
+    this.startLocation = this.cleanStopName(this.nearestStopClean);
+    this.startTimeStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    this.speedingStartTimeStr = null;
+    this.speedingEndTimeStr = null;
+    this.speedingStartStop = null;
+    this.speedingEndStop = null;
+
+    // Update UI Buttons
+    const startBtn = document.getElementById('btn-speedo-start');
+    const startText = document.getElementById('speedo-start-text');
+    if (startBtn && startText) {
+      startBtn.style.background = '#e67e22';
+      startText.textContent = 'Pause';
+    }
+    const finishBtn = document.getElementById('btn-speedo-finish');
+    if (finishBtn) finishBtn.disabled = false;
+
+    // Start timer loop (every 250ms)
+    clearInterval(this.timerInterval);
+    this.timerInterval = setInterval(() => this.tick(), 250);
+
+    // Show Active Session Card
+    const activeCard = document.getElementById('speedo-active-session-card');
+    const liveStartLoc = document.getElementById('speedo-live-start-loc');
+    const liveStartTime = document.getElementById('speedo-live-start-time');
+    if (activeCard) activeCard.style.display = 'block';
+    if (liveStartLoc) liveStartLoc.textContent = `Start: ${this.startLocation}`;
+    if (liveStartTime) liveStartTime.textContent = `Time: ${this.startTimeStr}`;
+  },
+
+  pauseSpeedSession() {
+    this.isPaused = true;
+    const startBtn = document.getElementById('btn-speedo-start');
+    const startText = document.getElementById('speedo-start-text');
+    if (startBtn && startText) {
+      startBtn.style.background = '#2ecc71';
+      startText.textContent = 'Resume';
+    }
+  },
+
+  resumeSpeedSession() {
+    this.isPaused = false;
+    this.lastTickTime = Date.now();
+    const startBtn = document.getElementById('btn-speedo-start');
+    const startText = document.getElementById('speedo-start-text');
+    if (startBtn && startText) {
+      startBtn.style.background = '#e67e22';
+      startText.textContent = 'Pause';
+    }
+  },
+
+  finishSpeedSession() {
+    if (!this.isTracking) return;
+
+    clearInterval(this.timerInterval);
+    this.isTracking = false;
+    this.isPaused = false;
+
+    const endLocation = this.cleanStopName(this.nearestStopClean);
+    const endTimeStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const totalDurationMs = Date.now() - this.sessionStartTime;
+    const avgSpeed = this.speedReadings.length > 0 
+      ? (this.speedReadings.reduce((a,b) => a+b, 0) / this.speedReadings.length) 
+      : 0;
+
+    // Speeding interval and stops
+    const speedingTimeInterval = (this.speedingStartTimeStr && this.speedingEndTimeStr)
+      ? `${this.speedingStartTimeStr}-${this.speedingEndTimeStr}`
+      : `${this.startTimeStr}-${endTimeStr}`;
+
+    const speedingStops = (this.speedingStartStop && this.speedingEndStop)
+      ? `${this.speedingStartStop}-${this.speedingEndStop}`
+      : `${this.startLocation}-${endLocation}`;
+
+    const runRecord = {
+      id: Date.now(),
+      dateStr: new Date().toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }),
+      timeSpan: `${this.startTimeStr || ''} - ${endTimeStr}`,
+      startLocation: this.startLocation || 'Start',
+      endLocation: endLocation,
+      totalDurationMs: totalDurationMs,
+      maxSpeed: this.maxSpeed,
+      avgSpeed: avgSpeed,
+      totalSpeedingMs: this.totalSpeedingMs,
+      speedingTimeInterval: speedingTimeInterval,
+      speedingStops: speedingStops
+    };
+
+    this.savedRuns.unshift(runRecord);
+    this.saveSavedRuns();
+
+    // Reset Controls UI
+    const startBtn = document.getElementById('btn-speedo-start');
+    const startText = document.getElementById('speedo-start-text');
+    if (startBtn && startText) {
+      startBtn.style.background = '#2ecc71';
+      startText.textContent = 'Start';
+    }
+    const finishBtn = document.getElementById('btn-speedo-finish');
+    if (finishBtn) finishBtn.disabled = true;
+
+    const activeCard = document.getElementById('speedo-active-session-card');
+    if (activeCard) activeCard.style.display = 'none';
+
+    this.renderSavedRuns();
+    showCopyToast(`✓ Speed Audit Saved to Logs`);
+  },
+
+  resetRun() {
+    clearInterval(this.timerInterval);
+    this.isTracking = false;
+    this.isPaused = false;
+    this.sessionStartTime = null;
+    this.totalSpeedingMs = 0;
+    this.maxSpeed = 0;
+    this.speedReadings = [];
+
+    // Reset Metrics HUD
+    const maxEl = document.getElementById('speedo-metric-max');
+    const avgEl = document.getElementById('speedo-metric-avg');
+    const speedEl = document.getElementById('speedo-metric-speeding');
+    const timeEl = document.getElementById('speedo-metric-time');
+
+    if (maxEl) maxEl.innerHTML = `0.0 <small style="font-size:0.65rem;">MPH</small>`;
+    if (avgEl) avgEl.innerHTML = `0.0 <small style="font-size:0.65rem;">MPH</small>`;
+    if (speedEl) speedEl.textContent = '00:00';
+    if (timeEl) timeEl.textContent = '00:00';
+
+    const startBtn = document.getElementById('btn-speedo-start');
+    const startText = document.getElementById('speedo-start-text');
+    if (startBtn && startText) {
+      startBtn.style.background = '#2ecc71';
+      startText.textContent = 'Start';
+    }
+    const finishBtn = document.getElementById('btn-speedo-finish');
+    if (finishBtn) finishBtn.disabled = true;
+
+    const activeCard = document.getElementById('speedo-active-session-card');
+    if (activeCard) activeCard.style.display = 'none';
+  },
+
+  tick() {
+    if (!this.isTracking || this.isPaused) return;
+
+    const now = Date.now();
+    const dt = now - (this.lastTickTime || now);
+    this.lastTickTime = now;
+
+    // Accumulate speeding duration if over 20 MPH
+    if (this.currentSpeed > 20) {
+      this.totalSpeedingMs += dt;
+    }
+
+    // Total Time
+    const totalElapsedMs = now - this.sessionStartTime;
+    const timeEl = document.getElementById('speedo-metric-time');
+    if (timeEl) timeEl.textContent = this.formatDuration(totalElapsedMs);
+
+    const liveTimer = document.getElementById('speedo-live-timer');
+    if (liveTimer) liveTimer.textContent = this.formatDuration(totalElapsedMs);
+
+    // Total Speeding Duration
+    const speedingEl = document.getElementById('speedo-metric-speeding');
+    if (speedingEl) speedingEl.textContent = this.formatDuration(this.totalSpeedingMs);
+  },
+
+  formatDuration(ms) {
+    if (!ms || ms <= 0) return '00:00';
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  },
+
+  loadSavedRuns() {
+    try {
+      const raw = localStorage.getItem(this.STORAGE_KEY);
+      this.savedRuns = raw ? JSON.parse(raw) : [];
+    } catch(e) {
+      this.savedRuns = [];
+    }
+  },
+
+  saveSavedRuns() {
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.savedRuns.slice(0, 50)));
+    } catch(e) {}
+  },
+
+  clearSavedRuns() {
+    if (confirm("Are you sure you want to clear all saved speed runs?")) {
+      this.savedRuns = [];
+      this.saveSavedRuns();
+      this.renderSavedRuns();
+    }
+  },
+
+  generateSpeedNote(run) {
+    if (!run) return '';
+    const speedStr = `${run.maxSpeed.toFixed(1)} MPH`;
+    const intervalStr = run.speedingTimeInterval || run.timeSpan || 'Time';
+    const stopsStr = run.speedingStops || `${run.startLocation || 'Start'}-${run.endLocation || 'End'}`;
+    return `${speedStr}(${intervalStr}, ${stopsStr}) || Speeding`;
+  },
+
+  renderSavedRuns() {
+    const container = document.getElementById('speedo-saved-runs-list');
+    if (!container) return;
+
+    if (this.savedRuns.length === 0) {
+      container.innerHTML = `<div style="text-align:center; padding:1.5rem 0.5rem; color:rgba(255,255,255,0.35); font-size:0.75rem;">No saved speed runs yet. Finished runs will appear here.</div>`;
+      return;
+    }
+
+    container.innerHTML = this.savedRuns.map((run, idx) => {
+      const speedingColor = run.totalSpeedingMs > 0 ? '#e74c3c' : '#2ecc71';
+      const notePreview = this.generateSpeedNote(run);
+
+      return `
+        <div class="result-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 0.85rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.4rem;">
+            <div style="display:flex; align-items:center; gap: 6px;">
+              <span class="pill-badge" style="background:rgba(241,196,15,0.15); color:#f1c40f; border:1px solid rgba(241,196,15,0.3); font-size:0.65rem; font-weight:800;">
+                RUN #${this.savedRuns.length - idx}
+              </span>
+              <span style="font-size: 0.78rem; color: rgba(255,255,255,0.6);">${run.dateStr}</span>
+              <span style="font-size: 0.68rem; color: rgba(255,255,255,0.4);">(${run.timeSpan || ''})</span>
+            </div>
+            <button class="icon-btn-sm btn-send-run-note" data-idx="${idx}" style="margin:0; padding: 4px 10px; width:auto; height:28px; border-radius:8px; gap:5px; font-size:0.72rem; font-weight:700; background:rgba(46,204,113,0.15); border:1px solid rgba(46,204,113,0.35); color:var(--green); display:flex; align-items:center;" title="Send as Note to Current Report">
+              <svg class="icon-xs" style="fill:var(--green); width:13px; height:13px;"><use href="#icon-send"/></svg>
+              <span>Send</span>
+            </button>
+          </div>
+
+          <div style="font-size: 0.74rem; color: rgba(255,255,255,0.8); margin-bottom: 0.45rem;">
+            📍 <span style="color:#fff; font-weight:700;">${run.startLocation || 'Start'}</span> ➔ <span style="color:#fff; font-weight:700;">${run.endLocation || 'End'}</span>
+          </div>
+
+          <div style="background: rgba(0,0,0,0.25); border-radius: 6px; padding: 4px 8px; margin-bottom: 0.45rem; font-family: monospace; font-size: 0.68rem; color: #2ecc71;">
+            ${notePreview}
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; font-size: 0.72rem;">
+            <div>Time: <strong style="color:#fff;">${this.formatDuration(run.totalDurationMs)}</strong></div>
+            <div>Max: <strong style="color:${run.maxSpeed > 20 ? '#e74c3c' : '#fff'};">${run.maxSpeed.toFixed(1)} MPH</strong></div>
+            <div>>20 MPH: <strong style="color:${speedingColor};">${this.formatDuration(run.totalSpeedingMs)}</strong></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.querySelectorAll('.btn-send-run-note').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        this.promptSendNote(this.savedRuns[idx]);
+      });
+    });
+  },
+
+  promptSendNote(run) {
+    if (!run) return;
+    const noteText = this.generateSpeedNote(run);
+    this.pendingNoteText = noteText;
+
+    // Detect active reports
+    const activeReports = [];
+    if (State.fl?.session?.startTime) activeReports.push('fl');
+    if (State.sw?.session?.startTime) activeReports.push('sw');
+    if (State.lc?.session?.startTime) activeReports.push('lc');
+
+    // If only one report is active, send immediately!
+    if (activeReports.length === 1) {
+      this.sendNoteToReport(activeReports[0], noteText);
+      return;
+    }
+
+    // Otherwise open modal for user to select
+    const previewEl = document.getElementById('speedo-send-modal-preview');
+    if (previewEl) previewEl.textContent = noteText;
+    const modal = document.getElementById('speedo-send-modal');
+    if (modal) modal.classList.add('active');
+  },
+
+  sendNoteToReport(reportType, noteText) {
+    if (!State[reportType].session.notes) State[reportType].session.notes = [];
+    State[reportType].session.notes.push(noteText);
+
+    if (reportType === 'sw') {
+      if (typeof swRenderNotes === 'function') swRenderNotes();
+      if (typeof swSaveSession === 'function') swSaveSession();
+    } else if (reportType === 'fl') {
+      if (typeof flRenderNotes === 'function') flRenderNotes();
+      if (typeof flSaveSession === 'function') flSaveSession();
+    } else if (reportType === 'lc') {
+      if (typeof lcRenderNotes === 'function') lcRenderNotes();
+      if (typeof lcSaveSessionToStorage === 'function') lcSaveSessionToStorage();
+    }
+
+    // Close modal if open
+    const modal = document.getElementById('speedo-send-modal');
+    if (modal) modal.classList.remove('active');
+
+    navigator.clipboard?.writeText(noteText);
+    const reportName = reportType === 'fl' ? 'Full Loop' : (reportType === 'sw' ? 'Stopwatch' : 'Liberty');
+    showCopyToast(`✓ Sent to ${reportName} Notes!`);
+  },
+
+  bindEvents() {
+    const startBtn = document.getElementById('btn-speedo-start');
+    if (startBtn) {
+      startBtn.addEventListener('click', () => {
+        if (!this.isTracking) {
+          this.startSpeedSession();
+        } else if (this.isPaused) {
+          this.resumeSpeedSession();
+        } else {
+          this.pauseSpeedSession();
+        }
+      });
+    }
+
+    const finishBtn = document.getElementById('btn-speedo-finish');
+    if (finishBtn) {
+      finishBtn.addEventListener('click', () => this.finishSpeedSession());
+    }
+
+    const resetBtn = document.getElementById('btn-speedo-reset');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        if (confirm("Reset current speed run?")) {
+          this.resetRun();
+        }
+      });
+    }
+
+    const clearLogsBtn = document.getElementById('btn-clear-speedo-logs');
+    if (clearLogsBtn) {
+      clearLogsBtn.addEventListener('click', () => this.clearSavedRuns());
+    }
+
+    // Send Note Modal Listeners
+    document.getElementById('btn-close-speedo-modal')?.addEventListener('click', () => {
+      document.getElementById('speedo-send-modal')?.classList.remove('active');
+    });
+
+    document.querySelectorAll('.btn-attach-speed-report').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const targetReport = btn.dataset.targetReport;
+        if (this.pendingNoteText && targetReport) {
+          this.sendNoteToReport(targetReport, this.pendingNoteText);
+        }
+      });
+    });
+  }
+};
+
+// Initialize Speedometer Engine
+if (window.SpeedometerEngine) window.SpeedometerEngine.init();
+
