@@ -531,7 +531,9 @@ document.getElementById('btn-mini-dispatch').addEventListener('click', () => {
   openDispatchOverlayModal();
 });
 
-const COUNTIF_PROXY_URL = 'https://topviewloggerr.onrender.com';
+const COUNTIF_PROXY_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
+  ? `http://${window.location.hostname}:3000`
+  : 'https://topviewloggerr.onrender.com';
 
 // ============================================================
 // IN-APP BROWSER & LIVE TELEMETRY OVERLAY
@@ -1277,18 +1279,20 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
     const busClean = record.bus || '-';
     const stopClean = DispatchEngine.formatStopLabel(record.stop);
     const routeMeta = DispatchEngine.getRouteMeta(record.route);
+    const supervisor = DispatchEngine.extractSupervisor(record);
     // Determine Departure / Arrival Type
     let typeClean = (record.type || '').trim();
     let isDep = typeClean.toLowerCase().includes('dep') || (record.stop || '').toLowerCase().includes('dep');
     let isArr = typeClean.toLowerCase().includes('arr') || (record.stop || '').toLowerCase().includes('arr');
     let typeBadge = '';
-    if (typeClean) {
-      const isD = typeClean.toLowerCase().includes('dep');
-      typeBadge = `<span class="pill-badge ${isD ? 'badge-type-dep' : 'badge-type-arr'}">${typeClean}</span>`;
-    } else if (isDep) {
+    if (isDep) {
       typeBadge = `<span class="pill-badge badge-type-dep">Departure</span>`;
     } else if (isArr) {
       typeBadge = `<span class="pill-badge badge-type-arr">Arrival</span>`;
+    } else if (typeClean.toLowerCase().includes('dispatch')) {
+      typeBadge = `<span class="pill-badge badge-type-arr">Dispatch</span>`;
+    } else if (typeClean) {
+      typeBadge = `<span class="pill-badge badge-type-arr">${typeClean}</span>`;
     }
 
     const busEsc = (record.bus || '').replace(/'/g, "\\'");
