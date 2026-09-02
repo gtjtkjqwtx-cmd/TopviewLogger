@@ -531,9 +531,7 @@ document.getElementById('btn-mini-dispatch').addEventListener('click', () => {
   openDispatchOverlayModal();
 });
 
-const COUNTIF_PROXY_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-  ? `http://${window.location.hostname}:3000`
-  : 'https://topviewloggerr.onrender.com';
+const COUNTIF_PROXY_URL = 'https://topviewloggerr.onrender.com';
 
 // ============================================================
 // IN-APP BROWSER & LIVE TELEMETRY OVERLAY
@@ -969,11 +967,35 @@ async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
   }
 
   try {
-    const cookieParam = portalSessionCookie ? `cookie=${encodeURIComponent(portalSessionCookie)}&` : '';
-    const limitParam = 'limit=500';
-    const result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?${cookieParam}${limitParam}`, 'GET');
+    let result;
+    try {
+      const cookieParam = portalSessionCookie ? `cookie=${encodeURIComponent(portalSessionCookie)}&` : '';
+      const limitParam = 'limit=500';
+      result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?${cookieParam}${limitParam}`, 'GET');
+    } catch(fetchErr) {
+      result = { success: false, message: fetchErr.message };
+    }
 
-    if (result.success) {
+    if (!result || !result.success) {
+      console.log('[Dispatch] Session missing or expired on proxy. Performing on-the-fly login...');
+      try {
+        const loginData = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/login`, 'POST', {
+          username: 'fvazquez',
+          password: 'Topview12345'
+        });
+        if (loginData.success && loginData.sessionCookie) {
+          portalSessionCookie = loginData.sessionCookie;
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('portal_session_cookie', portalSessionCookie);
+          }
+          result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}&limit=500`, 'GET');
+        }
+      } catch(loginErr) {
+        console.warn('[Dispatch] Auto-login fallback failed:', loginErr.message);
+      }
+    }
+
+    if (result && result.success) {
       if (result.sessionCookie) {
         portalSessionCookie = result.sessionCookie;
         if (typeof localStorage !== 'undefined') {
