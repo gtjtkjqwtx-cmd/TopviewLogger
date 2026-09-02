@@ -1277,29 +1277,51 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
     const busClean = record.bus || '-';
     const stopClean = DispatchEngine.formatStopLabel(record.stop);
     const routeMeta = DispatchEngine.getRouteMeta(record.route);
-    const supervisor = DispatchEngine.extractSupervisor(record);
-    const isDeparture = (record.type || '').toLowerCase().includes('dep') || (record.stop || '').toLowerCase().includes('dep');
-    const isArrival = (record.type || '').toLowerCase().includes('arr') || (record.stop || '').toLowerCase().includes('arr');
+    // Determine Departure / Arrival Type
+    let typeClean = (record.type || '').trim();
+    let isDep = typeClean.toLowerCase().includes('dep') || (record.stop || '').toLowerCase().includes('dep');
+    let isArr = typeClean.toLowerCase().includes('arr') || (record.stop || '').toLowerCase().includes('arr');
+    let typeBadge = '';
+    if (typeClean) {
+      const isD = typeClean.toLowerCase().includes('dep');
+      typeBadge = `<span class="pill-badge ${isD ? 'badge-type-dep' : 'badge-type-arr'}">${typeClean}</span>`;
+    } else if (isDep) {
+      typeBadge = `<span class="pill-badge badge-type-dep">Departure</span>`;
+    } else if (isArr) {
+      typeBadge = `<span class="pill-badge badge-type-arr">Arrival</span>`;
+    }
 
     const busEsc = (record.bus || '').replace(/'/g, "\\'");
     const opEsc = (record.operator || '').replace(/'/g, "\\'");
     const supEsc = (supervisor || '').replace(/'/g, "\\'");
     const stopEsc = stopClean.replace(/'/g, "\\'");
     const isStopContext = (currentPortalFilterLabel || '').toLowerCase().includes('stop') ? 'stop' : 'bus';
-    const typeStr = record.type ? ` (${record.type})` : '';
 
     return `
-      <div class="result-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 0.8rem; margin-bottom: 0.5rem;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.4rem;">
-          <span style="color: var(--green); font-weight: 700; font-size: 0.95rem;">Bus ${record.bus || '-'}</span>
+      <div class="result-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 0.8rem; margin-bottom: 0.5rem;">
+        <!-- Row 1: Bus Block, Route Block, Type Block | Timestamp -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.45rem;">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span class="pill-badge badge-bus">${busClean}</span>
+            <span class="pill-badge ${routeMeta.class}">${routeMeta.name}</span>
+            ${typeBadge}
+          </div>
           <span style="font-size: 0.85rem; font-weight: 600; opacity: 0.9; color: white;">${displayTimestamp}</span>
         </div>
-        ${options.hideStop ? (record.type ? `<div style="font-size: 0.8rem; color: #2ecc71; font-weight:600; margin-bottom: 0.4rem;">${record.type}${supervisor ? ` • <span style="opacity:0.75; color:white; font-weight:400;">Sup: ${supervisor}</span>` : ''}</div>` : '') : `<div style="font-size: 0.8rem; color: white; margin-bottom: 0.4rem; opacity: 0.85;">${record.stop || 'Stop -'}${typeStr}${supervisor ? ` • <span style="opacity:0.75;">Sup: ${supervisor}</span>` : ''}</div>`}
-        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; opacity: 0.9; font-weight: 500; margin-top: 6px;">
-          <span>${record.operator || 'No Driver'} • <span style="opacity:0.7;">${record.route || ''}</span></span>
+
+        <!-- Row 2: Driver Block, Stop Block, Supervisor Block -->
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 0.45rem;">
+          <span class="pill-badge badge-driver">${record.operator || 'No Driver'}</span>
+          ${options.hideStop ? '' : `<span class="pill-badge badge-stop">${stopClean}</span>`}
+          ${supervisor ? `<span class="pill-badge badge-supervisor">${supervisor}</span>` : ''}
+        </div>
+
+        <!-- Row 3: Route Description & Action Buttons -->
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.45rem; margin-top: 4px;">
+          <span style="font-size: 0.8rem; color: rgba(255,255,255,0.5); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 55%;">${record.route || 'Standard Route'}</span>
           <div style="display: flex; align-items: center; gap: 6px;">
             <button class="btn-start-session-card" onclick="window.startSessionWithDispatch('${busEsc}', '${opEsc}', '${supEsc}', '${stopEsc}', '${isStopContext}')" title="Start Session">
-              <span>⚡ Start Session</span>
+              <span>Start Session</span>
             </button>
             <button class="violation-btn-sm" style="width: 26px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(46, 204, 113, 0.1); border: 1px solid rgba(46, 204, 113, 0.2);" 
                     onclick="navigator.clipboard.writeText('${opEsc}').then(() => showCopyToast('✓ Copied: ${opEsc}'))" title="Copy Driver Name">
