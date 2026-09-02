@@ -4220,7 +4220,7 @@ window.SpeedometerEngine = {
 
   start() {
     this.requestWakeLock();
-    this.startGpsWatch();
+    this.requestLocationPermission();
     this.renderSavedRuns();
   },
 
@@ -4230,6 +4230,34 @@ window.SpeedometerEngine = {
       navigator.geolocation.clearWatch(this.watchId);
       this.watchId = null;
     }
+  },
+
+  requestLocationPermission() {
+    if (!navigator.geolocation) {
+      const nearestEl = document.getElementById('speedo-nearest-stop');
+      if (nearestEl) nearestEl.textContent = 'Geolocation not supported';
+      return;
+    }
+    const nearestEl = document.getElementById('speedo-nearest-stop');
+    if (nearestEl) nearestEl.textContent = 'Requesting location access...';
+
+    // getCurrentPosition triggers the iOS permission dialog
+    navigator.geolocation.getCurrentPosition(
+      () => {
+        // Permission granted — start continuous watching
+        this.startGpsWatch();
+      },
+      (err) => {
+        console.warn('[Speedometer] Location permission denied or failed:', err.message);
+        if (nearestEl) nearestEl.textContent = 'Location access denied';
+        const gpsBadge = document.getElementById('speedo-gps-badge');
+        if (gpsBadge) {
+          gpsBadge.textContent = 'GPS: Denied';
+          gpsBadge.style.color = '#e74c3c';
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   },
 
   startGpsWatch() {
