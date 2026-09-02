@@ -48,9 +48,9 @@
     .stop-tip { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #000; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; opacity: 0; pointer-events: none; transition: all 0.2s ease; white-space: nowrap; margin-bottom: 8px; border: 1px solid #2ecc71; box-shadow: 0 4px 15px rgba(0,0,0,0.8); z-index: 200; }
     .stop-marker-wrapper:hover .stop-tip { opacity: 1; transform: translateX(-50%) translateY(-5px); }
   </style>
-  <script type="module" crossorigin src="/assets/index-D1ngQNrJ.js"></script>
+  <script type="module" crossorigin src="/assets/index-DvPmiN0Q.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/dist-CGbJw_cl.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-DuzYGPmo.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-JJEgsDcU.css">
 </head>
 <body style="background-color: #0a0a0a; margin: 0; padding: 0;">
   <script>
@@ -221,9 +221,29 @@
               <span class="metric-label">ACTIVE BUSES</span>
               <span id="portal-results-count" class="metric-value" style="color:var(--green);">0</span>
             </div>
-            <div class="metric-card">
+            <div class="metric-card" style="position: relative;">
               <span class="metric-label">LAST SYNC</span>
-              <span id="portal-last-sync-time" class="metric-value" style="font-size:0.95rem; font-weight:700;">Just now</span>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <span id="portal-last-sync-time" class="metric-value" style="font-size:0.95rem; font-weight:700;">Just now</span>
+                <div id="portal-progress-ring-container" class="sync-quadrant-container" title="Click to view 4-step progress">
+                  <svg id="sync-quadrant-svg" class="sync-quadrant-svg" viewBox="0 0 36 36">
+                    <circle class="sync-quad-bg" cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3.5" />
+                    <circle id="quad-seg-1" class="sync-quad-seg" cx="18" cy="18" r="14" fill="none" stroke-width="3.5" stroke-dasharray="22 66" stroke-dashoffset="22" />
+                    <circle id="quad-seg-2" class="sync-quad-seg" cx="18" cy="18" r="14" fill="none" stroke-width="3.5" stroke-dasharray="22 66" stroke-dashoffset="0" />
+                    <circle id="quad-seg-3" class="sync-quad-seg" cx="18" cy="18" r="14" fill="none" stroke-width="3.5" stroke-dasharray="22 66" stroke-dashoffset="-22" />
+                    <circle id="quad-seg-4" class="sync-quad-seg" cx="18" cy="18" r="14" fill="none" stroke-width="3.5" stroke-dasharray="22 66" stroke-dashoffset="-44" />
+                  </svg>
+                  <span id="sync-quad-icon" class="sync-quad-center-icon visible">✓</span>
+                </div>
+              </div>
+
+              <!-- Tooltip popup for the 4 steps -->
+              <div id="portal-step-tooltip" class="sync-step-tooltip" style="display: none;">
+                <div class="tooltip-step-row complete" data-step="1"><span class="step-dot">●</span> <span>1. Init Proxy</span></div>
+                <div class="tooltip-step-row complete" data-step="2"><span class="step-dot">●</span> <span>2. Auth Session</span></div>
+                <div class="tooltip-step-row complete" data-step="3"><span class="step-dot">●</span> <span>3. Scrape Records</span></div>
+                <div class="tooltip-step-row complete" data-step="4"><span class="step-dot">●</span> <span>4. Render Feed</span></div>
+              </div>
             </div>
           </div>
           
@@ -251,9 +271,9 @@
             </button>
           </div>
 
-          <button id="btn-portal-refresh" class="btn-primary full-width portal-action-btn" data-action="refresh" style="height: 48px; border-radius: 12px; margin-bottom:1.5rem; background:white; color:black; border:none; font-weight:800;">
-            <svg class="icon-sm" style="margin-right:8px; fill:black;"><use href="#icon-refresh"/></svg>
-            <span style="color:black;">Refresh Feed</span>
+          <button id="btn-portal-refresh" class="btn-primary full-width portal-action-btn btn-sync-idle" data-action="refresh" style="height: 48px; border-radius: 12px; margin-bottom:1.5rem; background:white; color:black; border:none; font-weight:800;">
+            <svg id="portal-refresh-icon" class="icon-sm" style="margin-right:8px; fill:black;"><use href="#icon-refresh"/></svg>
+            <span id="portal-refresh-text" style="color:black;">Sync</span>
             <div class="gloss-sheen" style="background: linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,0.05), rgba(0,0,0,0));"></div>
           </button>
           
@@ -945,23 +965,45 @@
     </div>
   </div>
 
-  <!-- ============ FLOATING DISPATCH PILL (Draggable) ============ -->
-  <div id="floating-dispatch-pill" title="Open Integrated Dispatch" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; background: #0e2719; background: rgba(14, 39, 25, 0.95); border: 1px solid rgba(46, 204, 113, 0.4); backdrop-filter: blur(10px); padding: 8px 14px; border-radius: 50px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); color: var(--green); font-size: 0.75rem; font-weight: 700; user-select: none;">
-    <div class="status-dot" style="background: var(--green); width: 8px; height: 8px; margin: 0;"></div>
-    <span>📡 Dispatch</span>
+  <!-- ============ FLOATING DISPATCH PILL (Toggle Open/Close) ============ -->
+  <div id="floating-dispatch-pill" title="Toggle Integrated Dispatch" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; background: #0e2719; background: rgba(14, 39, 25, 0.95); border: 1px solid rgba(46, 204, 113, 0.4); backdrop-filter: blur(10px); padding: 8px 14px; border-radius: 50px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); color: var(--green); font-size: 0.75rem; font-weight: 700; user-select: none; transition: all 0.25s ease;">
+    <div id="floating-dispatch-dot" class="status-dot" style="background: var(--green); width: 8px; height: 8px; margin: 0;"></div>
+    <span id="floating-dispatch-text">📡 Dispatch</span>
   </div>
 
   <!-- ============ INTEGRATED DISPATCH OVERLAY MODAL ============ -->
   <div id="dispatch-overlay-modal" class="modal-overlay">
     <div class="modal card" style="max-width: 520px; width: 95%; max-height: 85vh; overflow-y: auto; padding: 1.5rem; position: relative;">
       <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.8rem;">
-        <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           <span style="font-size: 1.1rem; font-weight: 800;">CountIf Dispatch Portal</span>
           <span class="status-badge" style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; font-size: 0.65rem; padding: 2px 6px;">Integrated</span>
+          <button id="btn-open-dispatch-logs" class="btn-terminal-badge" title="Open Live Activity Logs">
+            <span>&gt;_ Logs</span>
+          </button>
         </div>
         <button id="btn-close-dispatch-overlay" class="icon-btn-sm" style="margin: 0;"><svg class="icon-xs"><use href="#icon-close"/></svg></button>
       </header>
       <div id="dispatch-overlay-body" style="min-height: 150px;"></div>
+    </div>
+  </div>
+
+  <!-- ============ LIVE ACTIVITY LOGS DRAWER (Slide-Up) ============ -->
+  <div id="dispatch-logs-backdrop" class="logs-drawer-backdrop" style="display:none;"></div>
+  <div id="dispatch-logs-drawer" class="dispatch-logs-drawer">
+    <div class="logs-drawer-handle-bar"></div>
+    <div class="logs-drawer-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-family:monospace; font-weight:800; color:#2ecc71; font-size:0.85rem;">&gt;_ Live Activity Terminal</span>
+        <span id="logs-status-indicator" class="status-dot" style="background:#2ecc71; width:6px; height:6px;"></span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button id="btn-clear-dispatch-logs" class="btn-clear-logs" title="Clear All Logs">Clear All</button>
+        <button id="btn-close-dispatch-logs" class="icon-btn-sm" style="width:24px; height:24px; padding:0;"><svg class="icon-xs"><use href="#icon-close"/></svg></button>
+      </div>
+    </div>
+    <div id="dispatch-terminal-body" class="dispatch-terminal-body">
+      <!-- Live logs appear here -->
     </div>
   </div>
 

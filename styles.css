@@ -1101,6 +1101,254 @@ button:active { transform: scale(.92) !important; background: rgba(255,255,255,0
 }
 
 .btn-form-autofill:hover {
+  background: rgba(46, 204, 113, 0.22);
+  border-color: #2ecc71;
+}
+
+/* ── Live Activity Terminal Badge & Drawer ── */
+.btn-terminal-badge {
+  background: rgba(46, 204, 113, 0.1);
+  border: 1px solid rgba(46, 204, 113, 0.35);
+  color: #2ecc71;
+  font-family: monospace;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+.btn-terminal-badge:hover {
+  background: rgba(46, 204, 113, 0.25);
+  box-shadow: 0 0 10px rgba(46, 204, 113, 0.3);
+}
+
+.logs-drawer-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 10500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.logs-drawer-backdrop.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dispatch-logs-drawer {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translate(-50%, 100%);
+  width: 100%;
+  max-width: 600px;
+  height: 55vh;
+  max-height: 500px;
+  background: #090d12;
+  border-top: 1px solid rgba(46, 204, 113, 0.3);
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.8), 0 0 20px rgba(46, 204, 113, 0.1);
+  z-index: 10501;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+.dispatch-logs-drawer.active {
+  transform: translate(-50%, 0);
+}
+
+.logs-drawer-handle-bar {
+  width: 36px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  margin: 8px auto 4px auto;
+}
+
+.logs-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.btn-clear-logs {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #bdc3c7;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-clear-logs:hover {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border-color: rgba(231, 76, 60, 0.3);
+}
+
+.dispatch-terminal-body {
+  flex: 1;
+  padding: 12px 16px;
+  font-family: 'SF Mono', 'Courier New', monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: #d1d8e0;
+  overflow-y: auto;
+  user-select: text;
+  background: #06090c;
+}
+
+.log-entry {
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+.log-ts {
+  color: rgba(255, 255, 255, 0.35);
+  margin-right: 6px;
+}
+.log-info { color: #2ecc71; }
+.log-warn { color: #f1c40f; }
+.log-err { color: #e74c3c; }
+.log-data { color: #3498db; }
+
+/* ── 4-Step Progression Circular Quadrant Ring ── */
+.sync-quadrant-container {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sync-quadrant-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.sync-quad-seg {
+  stroke: rgba(255, 255, 255, 0.08);
+  transition: stroke 0.3s ease, stroke-dashoffset 0.3s ease;
+}
+.sync-quad-seg.active {
+  stroke: #f1c40f;
+  animation: pulse-seg 1s infinite alternate;
+}
+.sync-quad-seg.complete {
+  stroke: #2ecc71;
+}
+.sync-quad-seg.error {
+  stroke: #e74c3c;
+}
+
+@keyframes pulse-seg {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+.sync-quad-center-icon {
+  position: absolute;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #2ecc71;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.sync-quad-center-icon.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.sync-step-tooltip {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: #0d1218;
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 150px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+  z-index: 1000;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.tooltip-step-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: rgba(255,255,255,0.4);
+}
+.tooltip-step-row:last-child { margin-bottom: 0; }
+.tooltip-step-row.complete { color: #2ecc71; }
+.tooltip-step-row.active { color: #f1c40f; }
+.tooltip-step-row.error { color: #e74c3c; }
+
+/* ── Sync Button State Machine ── */
+.btn-sync-loading svg {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.btn-sync-success {
+  background: #2ecc71 !important;
+  color: #06090c !important;
+  box-shadow: 0 0 16px rgba(46, 204, 113, 0.4);
+  transition: all 0.3s ease;
+}
+.btn-sync-success span, .btn-sync-success svg {
+  fill: #06090c !important;
+  color: #06090c !important;
+}
+
+.btn-sync-failed {
+  background: #e74c3c !important;
+  color: white !important;
+  box-shadow: 0 0 16px rgba(231, 76, 60, 0.4);
+  transition: all 0.3s ease;
+}
+.btn-sync-failed span, .btn-sync-failed svg {
+  fill: white !important;
+  color: white !important;
+}
+
+/* ── Floating Dispatch Pill Toggle State ── */
+#floating-dispatch-pill.modal-open {
+  background: rgba(30, 15, 15, 0.95) !important;
+  border-color: rgba(231, 76, 60, 0.4) !important;
+  color: #e74c3c !important;
+}
+#floating-dispatch-pill.modal-open .status-dot {
+  background: #e74c3c !important;
+}
+
+.btn-form-autofill:hover {
   background: #2ecc71;
   color: #0a0e14;
   box-shadow: 0 0 10px rgba(46, 204, 113, 0.4);

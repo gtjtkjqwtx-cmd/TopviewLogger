@@ -472,6 +472,22 @@ async function runFleetScan() {
 // COUNTIF CONNECT MODULE
 // ============================================================
 
+function updateFloatingDispatchPill(isOpen) {
+  const pill = document.getElementById('floating-dispatch-pill');
+  const text = document.getElementById('floating-dispatch-text');
+  const dot = document.getElementById('floating-dispatch-dot');
+  if (!pill) return;
+  if (isOpen) {
+    pill.classList.add('modal-open');
+    if (text) text.textContent = '✕ Close';
+    if (dot) dot.style.background = '#e74c3c';
+  } else {
+    pill.classList.remove('modal-open');
+    if (text) text.textContent = '📡 Dispatch';
+    if (dot) dot.style.background = 'var(--green)';
+  }
+}
+
 function openDispatchOverlayModal() {
   const modal = document.getElementById('dispatch-overlay-modal');
   const body = document.getElementById('dispatch-overlay-body');
@@ -486,6 +502,8 @@ function openDispatchOverlayModal() {
   if (setupEl) setupEl.style.display = 'none';
   if (portalEl) portalEl.style.display = 'block';
   
+  updateFloatingDispatchPill(true);
+
   if (!portalData || portalData.length === 0) {
     fetchDispatchData();
   } else {
@@ -500,6 +518,9 @@ function closeDispatchOverlayModal() {
   const modal = document.getElementById('dispatch-overlay-modal');
   if (modal) modal.classList.remove('active');
   
+  updateFloatingDispatchPill(false);
+  clearPortalFilter(); // Reset filter when closing per user request
+
   const countifContainer = document.querySelector('#countif-view .container');
   const setupEl = document.getElementById('countif-setup');
   const portalEl = document.getElementById('countif-portal');
@@ -523,13 +544,24 @@ if (dispatchModalEl) {
   });
 }
 
-document.getElementById('btn-experiment').addEventListener('click', () => {
-  openDispatchOverlayModal();
-});
+const btnExp = document.getElementById('btn-experiment');
+if (btnExp) {
+  btnExp.addEventListener('click', () => {
+    openDispatchOverlayModal();
+  });
+}
 
-document.getElementById('btn-mini-dispatch').addEventListener('click', () => {
-  openDispatchOverlayModal();
-});
+const btnMini = document.getElementById('btn-mini-dispatch');
+if (btnMini) {
+  btnMini.addEventListener('click', () => {
+    const modal = document.getElementById('dispatch-overlay-modal');
+    if (modal && modal.classList.contains('active')) {
+      closeDispatchOverlayModal();
+    } else {
+      openDispatchOverlayModal();
+    }
+  });
+}
 
 const COUNTIF_PROXY_URL = 'https://topviewloggerr.onrender.com';
 
@@ -938,46 +970,121 @@ async function refreshAllLoginsOnEntry(isSilent = true) {
   }
 }
 
+// ============================================================
+// LIVE ACTIVITY LOGGER & PROGRESS RING UTILITIES
+// ============================================================
+
+const DispatchLogger = {
+  logs: [],
+  maxLogs: 200,
+  log(msg, level = 'info') {
+    const d = new Date();
+    const ts = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const entry = { ts, msg, level };
+    this.logs.push(entry);
+    if (this.logs.length > this.maxLogs) this.logs.shift();
+    this.render();
+  },
+  clear() {
+    this.logs = [];
+    this.render();
+  },
+  render() {
+    const body = document.getElementById('dispatch-terminal-body');
+    if (!body) return;
+    if (this.logs.length === 0) {
+      body.innerHTML = '<div style="color:rgba(255,255,255,0.25); font-style:italic;">No log activity yet. Live activity will appear here...</div>';
+      return;
+    }
+    body.innerHTML = this.logs.map(l => {
+      const cls = l.level === 'err' ? 'log-err' : (l.level === 'warn' ? 'log-warn' : (l.level === 'data' ? 'log-data' : 'log-info'));
+      return `<div class="log-entry"><span class="log-ts">[${l.ts}]</span> <span class="${cls}">${l.msg}</span></div>`;
+    }).join('');
+    body.scrollTop = body.scrollHeight;
+  }
+};
+
+const DispatchProgressRing = {
+  currentStep: 0,
+  status: 'idle',
+  setStep(stepNum, status = 'complete') {
+    this.currentStep = stepNum;
+    this.status = status;
+    
+    for (let i = 1; i <= 4; i++) {
+      const seg = document.getElementById(`quad-seg-${i}`);
+      const row = document.querySelector(`.tooltip-step-row[data-step="${i}"]`);
+      if (!seg) continue;
+      
+      seg.classList.remove('active', 'complete', 'error');
+      if (row) row.classList.remove('active', 'complete', 'error');
+      
+      if (i < stepNum || (i === stepNum && status === 'complete')) {
+        seg.classList.add('complete');
+        if (row) row.classList.add('complete');
+      } else if (i === stepNum && status === 'active') {
+        seg.classList.add('active');
+        if (row) row.classList.add('active');
+      } else if (i === stepNum && status === 'error') {
+        seg.classList.add('error');
+        if (row) row.classList.add('error');
+      }
+    }
+    
+    const icon = document.getElementById('sync-quad-icon');
+    if (icon) {
+      if (stepNum === 4 && status === 'complete') {
+        icon.textContent = '✓';
+        icon.style.color = '#2ecc71';
+        icon.classList.add('visible');
+      } else if (status === 'error') {
+        icon.textContent = '✕';
+        icon.style.color = '#e74c3c';
+        icon.classList.add('visible');
+      } else {
+        icon.classList.remove('visible');
+      }
+    }
+  }
+};
+
 let portalSessionCookie = (typeof localStorage !== 'undefined') ? localStorage.getItem('portal_session_cookie') : null;
 let portalData = [];
 let portalLastSync = 0; // Timestamp of last successful dispatch sync
 
 async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
   const refreshBtn = document.getElementById('btn-portal-refresh');
-  const syncIndicator = document.getElementById('portal-sync-indicator');
-  const syncMessage = document.getElementById('portal-sync-message');
-  const syncProgress = document.getElementById('portal-sync-progress');
-  
-  let originalText = 'Refresh Feed';
+  const refreshText = document.getElementById('portal-refresh-text');
+
   if (refreshBtn && !isSilent) {
-    const span = refreshBtn.querySelector('span');
-    if (span) {
-      originalText = span.textContent;
-      span.textContent = 'Syncing...';
-    }
     refreshBtn.disabled = true;
-    refreshBtn.style.opacity = '0.7';
+    refreshBtn.classList.remove('btn-sync-idle', 'btn-sync-success', 'btn-sync-failed');
+    refreshBtn.classList.add('btn-sync-loading');
+    if (refreshText) refreshText.textContent = 'Syncing...';
   }
 
-  // Show status indicator only if not silent
-  if (syncIndicator && !isSilent) {
-    syncIndicator.style.display = 'block';
-    if (syncMessage) syncMessage.textContent = `Syncing ${contextLabel}...`;
-    if (syncProgress) syncProgress.classList.add('sync-anim');
-  }
+  DispatchLogger.log(`Starting sync for ${contextLabel}...`, 'info');
+  if (!isSilent) DispatchProgressRing.setStep(1, 'active');
 
   try {
+    DispatchLogger.log(`Connecting to proxy: ${COUNTIF_PROXY_URL}`, 'info');
+    if (!isSilent) {
+      DispatchProgressRing.setStep(1, 'complete');
+      DispatchProgressRing.setStep(2, 'active');
+    }
+
     let result;
     try {
       const cookieParam = portalSessionCookie ? `cookie=${encodeURIComponent(portalSessionCookie)}&` : '';
       const limitParam = 'limit=500';
       result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?${cookieParam}${limitParam}`, 'GET');
     } catch(fetchErr) {
+      DispatchLogger.log(`Direct fetch failed: ${fetchErr.message}`, 'warn');
       result = { success: false, message: fetchErr.message };
     }
 
     if (!result || !result.success) {
-      console.log('[Dispatch] Session missing or expired on proxy. Performing on-the-fly login...');
+      DispatchLogger.log('Session missing or expired. Authenticating on the fly...', 'warn');
       try {
         const loginData = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/login`, 'POST', {
           username: 'fvazquez',
@@ -988,14 +1095,33 @@ async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
           if (typeof localStorage !== 'undefined') {
             localStorage.setItem('portal_session_cookie', portalSessionCookie);
           }
+          DispatchLogger.log('Authentication successful. Session cookie acquired.', 'info');
+          if (!isSilent) {
+            DispatchProgressRing.setStep(2, 'complete');
+            DispatchProgressRing.setStep(3, 'active');
+          }
           result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}&limit=500`, 'GET');
+        } else {
+          throw new Error('Login credentials rejected.');
         }
       } catch(loginErr) {
-        console.warn('[Dispatch] Auto-login fallback failed:', loginErr.message);
+        DispatchLogger.log(`Auto-login failed: ${loginErr.message}`, 'err');
+        if (!isSilent) DispatchProgressRing.setStep(2, 'error');
+        throw loginErr;
+      }
+    } else {
+      if (!isSilent) {
+        DispatchProgressRing.setStep(2, 'complete');
+        DispatchProgressRing.setStep(3, 'active');
       }
     }
 
     if (result && result.success) {
+      if (!isSilent) {
+        DispatchProgressRing.setStep(3, 'complete');
+        DispatchProgressRing.setStep(4, 'active');
+      }
+
       if (result.sessionCookie) {
         portalSessionCookie = result.sessionCookie;
         if (typeof localStorage !== 'undefined') {
@@ -1003,14 +1129,15 @@ async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
         }
       }
       const todayStr = new Date().toDateString();
+      const rawCount = (result.data || []).length;
       portalData = (result.data || []).reverse().filter(record => {
         if (!record.date) return false;
         const recordDate = new Date(record.date);
         return recordDate.toDateString() === todayStr;
       });
       portalLastSync = Date.now();
-      console.log(`[Portal] Synced ${portalData.length} records (Calendar Day filter)`);
-      
+      DispatchLogger.log(`Downloaded ${rawCount} rows. Filtered ${portalData.length} records for today.`, 'data');
+
       // Update Top 2-Metric Stats: Active Buses & Last Sync Time
       const uniqueBuses = new Set(portalData.map(r => DispatchEngine.normalizeBusId(r.bus)).filter(Boolean));
       const countEl = document.getElementById('portal-results-count');
@@ -1042,30 +1169,44 @@ async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
         hidePortalFilterChip();
       }
 
+      if (!isSilent) {
+        DispatchProgressRing.setStep(4, 'complete');
+        DispatchLogger.log(`Live Feed ready (${uniqueBuses.size} active buses on duty).`, 'info');
+
+        // Update button state: Synced (holds for 2 seconds) then back to Sync
+        if (refreshBtn) {
+          refreshBtn.classList.remove('btn-sync-loading', 'btn-sync-idle');
+          refreshBtn.classList.add('btn-sync-success');
+          if (refreshText) refreshText.textContent = 'Synced';
+          setTimeout(() => {
+            refreshBtn.classList.remove('btn-sync-success');
+            refreshBtn.classList.add('btn-sync-idle');
+            if (refreshText) refreshText.textContent = 'Sync';
+            refreshBtn.disabled = false;
+          }, 2000);
+        }
+      }
+
       // Start 15-second background auto-sync loop
       startDispatchAutoSync();
     } else {
-      if (result.message === 'Session expired.') {
-        if (!isSilent) {
-          console.warn('Session refresh required.');
-        }
+      throw new Error(result ? result.message : 'Unknown response error');
+    }
+  } catch (e) {
+    DispatchLogger.log(`Sync error: ${e.message}`, 'err');
+    if (!isSilent) {
+      DispatchProgressRing.setStep(DispatchProgressRing.currentStep || 1, 'error');
+      if (refreshBtn) {
+        refreshBtn.classList.remove('btn-sync-loading', 'btn-sync-idle');
+        refreshBtn.classList.add('btn-sync-failed');
+        if (refreshText) refreshText.textContent = 'Failed';
+        setTimeout(() => {
+          refreshBtn.classList.remove('btn-sync-failed');
+          refreshBtn.classList.add('btn-sync-idle');
+          if (refreshText) refreshText.textContent = 'Sync';
+          refreshBtn.disabled = false;
+        }, 2000);
       }
-    }
-  } catch (err) {
-    if (!isSilent) console.error('[Portal] Sync error:', err);
-  } finally {
-    if (refreshBtn && !isSilent) {
-      refreshBtn.disabled = false;
-      const span = refreshBtn.querySelector('span');
-      if (span) span.textContent = originalText;
-      refreshBtn.style.opacity = '1';
-    }
-    
-    if (syncIndicator && !isSilent) {
-      setTimeout(() => {
-        syncIndicator.style.display = 'none';
-        if (syncProgress) syncProgress.classList.remove('sync-anim');
-      }, 800);
     }
   }
 }
@@ -1464,6 +1605,56 @@ document.getElementById('btn-portal-refresh').addEventListener('click', () => {
   clearPortalFilter();
   fetchDispatchData('Data', false);
 });
+
+// ── Live Activity Logs Drawer & Tooltip Listeners ──
+const btnOpenLogs = document.getElementById('btn-open-dispatch-logs');
+const btnCloseLogs = document.getElementById('btn-close-dispatch-logs');
+const logsDrawer = document.getElementById('dispatch-logs-drawer');
+const logsBackdrop = document.getElementById('dispatch-logs-backdrop');
+const btnClearLogs = document.getElementById('btn-clear-dispatch-logs');
+
+if (btnOpenLogs && logsDrawer && logsBackdrop) {
+  btnOpenLogs.addEventListener('click', (e) => {
+    e.stopPropagation();
+    logsDrawer.classList.add('active');
+    logsBackdrop.classList.add('active');
+    logsBackdrop.style.display = 'block';
+    DispatchLogger.render();
+  });
+}
+
+const closeLogsDrawer = () => {
+  if (logsDrawer) logsDrawer.classList.remove('active');
+  if (logsBackdrop) {
+    logsBackdrop.classList.remove('active');
+    setTimeout(() => { logsBackdrop.style.display = 'none'; }, 300);
+  }
+};
+
+if (btnCloseLogs) btnCloseLogs.addEventListener('click', closeLogsDrawer);
+if (logsBackdrop) logsBackdrop.addEventListener('click', closeLogsDrawer);
+if (btnClearLogs) {
+  btnClearLogs.addEventListener('click', () => {
+    DispatchLogger.clear();
+    showCopyToast('Logs cleared');
+  });
+}
+
+// 4-Step Progress Ring Tooltip Toggle
+const progressContainer = document.getElementById('portal-progress-ring-container');
+const progressTooltip = document.getElementById('portal-step-tooltip');
+if (progressContainer && progressTooltip) {
+  progressContainer.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isVis = progressTooltip.style.display === 'block';
+    progressTooltip.style.display = isVis ? 'none' : 'block';
+  });
+  document.addEventListener('click', (e) => {
+    if (!progressContainer.contains(e.target)) {
+      progressTooltip.style.display = 'none';
+    }
+  });
+}
 
 // ── Auto-Fill Shortcut Buttons in Forms ──
 const btnAutofillFlDriver = document.getElementById('fl-btn-autofill-driver');
@@ -1995,15 +2186,27 @@ document.querySelectorAll('.hud-shortcut').forEach(btn => {
   });
 });
 
-// Floating Pill Drag Logic
+// Floating Pill Drag & Toggle Logic
 const dispatchPill = document.getElementById('floating-dispatch-pill');
 if (dispatchPill) {
-  let pillDragging = false;
-  let startX, startY, initialLeft, initialTop, hasMoved = false;
+  let isDragging = false;
+  let hasMoved = false;
+  let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
+  let touchStartTime = 0;
+
+  const toggleDispatchModal = () => {
+    const modal = document.getElementById('dispatch-overlay-modal');
+    if (modal && modal.classList.contains('active')) {
+      closeDispatchOverlayModal();
+    } else {
+      openDispatchOverlayModal();
+    }
+  };
 
   const onStart = (e) => {
-    pillDragging = true;
+    isDragging = true;
     hasMoved = false;
+    touchStartTime = Date.now();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
     startX = clientX;
@@ -2011,37 +2214,41 @@ if (dispatchPill) {
     const rect = dispatchPill.getBoundingClientRect();
     initialLeft = rect.left;
     initialTop = rect.top;
-    dispatchPill.style.bottom = 'auto';
-    dispatchPill.style.right = 'auto';
-    dispatchPill.style.left = initialLeft + 'px';
-    dispatchPill.style.top = initialTop + 'px';
   };
 
   const onMove = (e) => {
-    if (!pillDragging) return;
+    if (!isDragging) return;
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
     const dx = clientX - startX;
     const dy = clientY - startY;
-    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+    
+    // Only engage drag move if moved more than 10px
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
       hasMoved = true;
+      dispatchPill.style.bottom = 'auto';
+      dispatchPill.style.right = 'auto';
+      dispatchPill.style.left = (initialLeft + dx) + 'px';
+      dispatchPill.style.top = (initialTop + dy) + 'px';
     }
-    dispatchPill.style.left = (initialLeft + dx) + 'px';
-    dispatchPill.style.top = (initialTop + dy) + 'px';
   };
 
   const onEnd = (e) => {
-    if (!pillDragging) return;
-    pillDragging = false;
-    if (!hasMoved) {
-      openDispatchOverlayModal();
+    if (!isDragging) return;
+    isDragging = false;
+    const elapsed = Date.now() - touchStartTime;
+    // If finger was lifted without moving (< 10px) or was a quick tap (< 350ms)
+    if (!hasMoved || elapsed < 300) {
+      toggleDispatchModal();
     }
   };
 
+  // Mouse events
   dispatchPill.addEventListener('mousedown', onStart);
   window.addEventListener('mousemove', onMove);
   window.addEventListener('mouseup', onEnd);
 
+  // Touch events (iOS / Android)
   dispatchPill.addEventListener('touchstart', onStart, { passive: true });
   window.addEventListener('touchmove', onMove, { passive: true });
   window.addEventListener('touchend', onEnd);
