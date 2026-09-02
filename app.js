@@ -483,13 +483,14 @@ function openDispatchOverlayModal() {
     body.appendChild(portalEl);
   }
   
-  if (portalSessionCookie) {
-    if (setupEl) setupEl.style.display = 'none';
-    if (portalEl) portalEl.style.display = 'block';
+  if (setupEl) setupEl.style.display = 'none';
+  if (portalEl) portalEl.style.display = 'block';
+  
+  if (!portalData || portalData.length === 0) {
     fetchDispatchData();
   } else {
-    if (setupEl) setupEl.style.display = 'block';
-    if (portalEl) portalEl.style.display = 'none';
+    // Already in memory, render immediately
+    renderPortalResults(portalData, 'Live Feed');
   }
   
   if (modal) modal.classList.add('active');
@@ -921,35 +922,27 @@ async function refreshAllLoginsOnEntry(isSilent = true) {
     if (!isSilent) console.warn("[AuthRefresh] Could not reach server proxy for Samsara check:", e.message);
   }
 
-  // 2. Check & Restore CountIf (Dispatch Portal) status
+  // 2. Check & Restore CountIf (Dispatch Portal) status (Server Auto-Managed)
   const dispatchBadge = document.getElementById('tracker-dispatch-status');
-  if (portalSessionCookie || (typeof localStorage !== 'undefined' && localStorage.getItem('portal_session_cookie'))) {
-    if (!portalSessionCookie) {
-      portalSessionCookie = localStorage.getItem('portal_session_cookie');
-    }
-    if (dispatchBadge) {
-      dispatchBadge.style.background = 'rgba(46, 204, 113, 0.2)';
-      dispatchBadge.style.color = '#2ecc71';
-      dispatchBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71; width: 6px; height: 6px;"></div><span>Dispatch Active</span>';
-    }
-    countifSetBadge('Synced', 'green');
-    if (!isSilent || !portalData || portalData.length === 0) {
-      fetchDispatchData();
-    }
-  } else if (dispatchBadge) {
-    dispatchBadge.style.background = 'rgba(255,255,255,0.05)';
-    dispatchBadge.style.color = 'rgba(255,255,255,0.4)';
-    dispatchBadge.innerHTML = '<div class="status-dot" style="width: 6px; height: 6px;"></div><span>Dispatch Idle</span>';
+  if (dispatchBadge) {
+    dispatchBadge.style.background = 'rgba(46, 204, 113, 0.2)';
+    dispatchBadge.style.color = '#2ecc71';
+    dispatchBadge.innerHTML = '<div class="status-dot" style="background:#2ecc71; width: 6px; height: 6px;"></div><span>Dispatch Active</span>';
+  }
+  countifSetBadge('Synced', 'green');
+
+  if (!portalData || portalData.length === 0) {
+    fetchDispatchData('Data', true);
+  } else {
+    renderPortalResults(portalData, 'Live Feed');
   }
 }
 
-let portalSessionCookie = localStorage.getItem('portal_session_cookie');
+let portalSessionCookie = (typeof localStorage !== 'undefined') ? localStorage.getItem('portal_session_cookie') : null;
 let portalData = [];
 let portalLastSync = 0; // Timestamp of last successful dispatch sync
 
 async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
-  if (!portalSessionCookie) return;
-  
   const refreshBtn = document.getElementById('btn-portal-refresh');
   const syncIndicator = document.getElementById('portal-sync-indicator');
   const syncMessage = document.getElementById('portal-sync-message');
@@ -974,22 +967,36 @@ async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
   }
 
   try {
-    const limitParam = '&limit=500';
-    const result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?cookie=${encodeURIComponent(portalSessionCookie)}${limitParam}`, 'GET');
+    const cookieParam = portalSessionCookie ? `cookie=${encodeURIComponent(portalSessionCookie)}&` : '';
+    const limitParam = 'limit=500';
+    const result = await xhrProxyRequest(`${COUNTIF_PROXY_URL}/api/countif/dispatch?${cookieParam}${limitParam}`, 'GET');
 
     if (result.success) {
-      const now = new Date();
+      if (result.sessionCookie) {
+        portalSessionCookie = result.sessionCookie;
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('portal_session_cookie', portalSessionCookie);
+        }
+      }
+      const todayStr = new Date().toDateString();
       portalData = (result.data || []).reverse().filter(record => {
         if (!record.date) return false;
         const recordDate = new Date(record.date);
-        const diffHrs = (now - recordDate) / (1000 * 60 * 60);
-        return diffHrs <= 24;
+        return recordDate.toDateString() === todayStr;
       });
       portalLastSync = Date.now();
-      console.log(`[Portal] Synced ${portalData.length} records (24h filter)`);
+      console.log(`[Portal] Synced ${portalData.length} records (Calendar Day filter)`);
       
+      // Update Top 2-Metric Stats: Active Buses & Last Sync Time
+      const uniqueBuses = new Set(portalData.map(r => DispatchEngine.normalizeBusId(r.bus)).filter(Boolean));
       const countEl = document.getElementById('portal-results-count');
-      if (countEl) countEl.textContent = `${portalData.length}`;
+      if (countEl) countEl.textContent = `${uniqueBuses.size}`;
+
+      const lastSyncEl = document.getElementById('portal-last-sync-time');
+      if (lastSyncEl) {
+        const d = new Date();
+        lastSyncEl.textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      }
 
       // Check if user currently has an active filter applied
       const busInput = document.getElementById('portal-input-bus');
@@ -1016,8 +1023,7 @@ async function fetchDispatchData(contextLabel = 'Data', isSilent = false) {
     } else {
       if (result.message === 'Session expired.') {
         if (!isSilent) {
-          alert('CountIf Session Expired. Please reconnect.');
-          countifResetDashboard();
+          console.warn('Session refresh required.');
         }
       }
     }
@@ -1108,8 +1114,35 @@ function hidePortalFilterChip() {
   if (chip) chip.style.display = 'none';
 }
 
-window.startSessionWithDispatch = function(bus, driver) {
+window.startSessionWithDispatch = function(bus, driver, supervisor, stop, context = '') {
   closeDispatchOverlayModal();
+
+  // If context is Stop or from a Stop card with supervisor info (and no specific bus):
+  if ((context === 'stop' || (!bus && stop)) && (stop || supervisor)) {
+    const swView = document.getElementById('sw-new-view');
+    const swStopInput = document.getElementById('sw-stop-num');
+    const swSupInput = document.getElementById('sw-supervisor-name');
+    const swTimeInput = document.getElementById('sw-time-started');
+
+    if (swStopInput) {
+      const match = (stop || '').match(/\d+/);
+      swStopInput.value = match ? match[0] : (stop || '');
+    }
+    if (swSupInput) {
+      swSupInput.value = supervisor || '';
+    }
+    if (swTimeInput && !swTimeInput.value) {
+      const now = new Date();
+      swTimeInput.value = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    if (swView) swView.classList.add('active');
+    showCopyToast(`✓ Loaded Stop into Stopwatch Report`);
+    return;
+  }
+
+  // Default: Full Loop Report with Bus & Driver
   const flBusInput = document.getElementById('fl-bus-number');
   const flDriverInput = document.getElementById('fl-driver-name');
   
@@ -1117,7 +1150,6 @@ window.startSessionWithDispatch = function(bus, driver) {
     flBusInput.value = bus || '';
     flDriverInput.value = driver || '';
     
-    // Switch to Full Loop new report view
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     const flNewView = document.getElementById('fl-new-view');
     if (flNewView) {
@@ -1129,7 +1161,7 @@ window.startSessionWithDispatch = function(bus, driver) {
       }
     }
   }
-  showCopyToast(`✓ Loaded Bus ${bus} into New Report`);
+  showCopyToast(`✓ Loaded Bus ${bus || ''} into Full Loop`);
 };
 
 function renderPortalResults(records, filterLabel = '', options = {}) {
@@ -1148,45 +1180,33 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
   const drVal = document.getElementById('snapshot-driver-val');
   const supVal = document.getElementById('snapshot-supervisor-val');
 
-  if (filterLabel) {
+  if (filterLabel && tag) {
     tag.textContent = filterLabel;
   }
 
   // Handle Snapshot Logic
-  snapshotArea.style.display = 'none';
-  driverRow.style.display = 'none';
-  superRow.style.display = 'none';
+  if (snapshotArea) snapshotArea.style.display = 'none';
+  if (driverRow) driverRow.style.display = 'none';
+  if (superRow) superRow.style.display = 'none';
 
-  // Blacklisted supervisors (partial match)
-  const superBlacklist = ['Stevenson', 'Michael Leshaj'];
-  // Supervisory role suffixes — only users with these in their name count as supervisors
-  const supervisorRoles = ['Supervisor', 'Coordinator', 'FieldCoordinator'];
-
-  function isBlacklisted(userName) {
-    return superBlacklist.some(bl => userName.includes(bl));
-  }
-  function isSupervisor(userName) {
-    return supervisorRoles.some(role => userName.includes(role));
-  }
-
-  if (records && records.length > 0) {
-    const isBus = filterLabel.toLowerCase().includes('bus');
-    const isStop = filterLabel.toLowerCase().includes('stop');
+  if (records && records.length > 0 && snapshotArea) {
+    const isBus = (filterLabel || '').toLowerCase().includes('bus');
+    const isStop = (filterLabel || '').toLowerCase().includes('stop');
 
     if (isBus || isStop) {
       snapshotArea.style.display = 'block';
-      if (isBus) {
+      if (isBus && driverRow && drVal) {
         driverRow.style.display = 'flex';
         driverRow.style.alignItems = 'center';
         driverRow.style.justifyContent = 'space-between';
         
-        const driverName = records[0].operator;
-        const timeStr = formatDisplayTime(records[0].date);
-        const relTime = getRelativeTimeStr(records[0].date);
+        const activeRec = DispatchEngine.findActiveDriver(records[0].bus, portalData) || records[0];
+        const driverName = activeRec.operator || 'Unknown Driver';
+        const timeStr = formatDisplayTime(activeRec.date);
+        const relTime = getRelativeTimeStr(activeRec.date);
         const timeBadge = relTime ? `${timeStr} (${relTime})` : timeStr;
         drVal.innerHTML = `${driverName} <span style="opacity:0.6; font-weight:400; margin-left:4px;">${timeBadge}</span>`;
         
-        // Add or update copy button
         let copyBtn = driverRow.querySelector('.btn-copy-driver');
         if (!copyBtn) {
           copyBtn = document.createElement('button');
@@ -1199,32 +1219,22 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
           navigator.clipboard.writeText(driverName).then(() => showCopyToast(`✓ Copied: ${driverName}`));
         };
       }
-      if (isStop) {
+      if (isStop && superRow && supVal) {
         superRow.style.display = 'flex';
+        const stopMatch = (filterLabel || '').match(/\d+/);
+        const stopNum = stopMatch ? stopMatch[0] : '';
+        const supervisorName = DispatchEngine.findSupervisorForStop(stopNum, portalData) || records[0].user || 'Field Supervisor';
         
-        // Search ALL records for this stop (not just the displayed ones)
-        const allMatches = options.allMatches || records;
-        const validRec = allMatches.find(r => isSupervisor(r.user) && !isBlacklisted(r.user)) || allMatches[0];
-        
-        let timeStr = '---';
-        const parts = validRec.date.split(' ');
-        if (parts.length >= 2) {
-          const timeParts = parts[1].split(':');
-          if (timeParts.length >= 2) {
-             const ampm = parts[2] || '';
-             timeStr = `${timeParts[0]}:${timeParts[1]} ${ampm}`.trim();
-          }
-        }
-        const relTime = getRelativeTimeStr(validRec.date);
+        let timeStr = formatDisplayTime(records[0].date);
+        const relTime = getRelativeTimeStr(records[0].date);
         const displaySuperTime = relTime ? `${timeStr} (${relTime})` : timeStr;
         
-        supVal.textContent = `${validRec.user} | ${displaySuperTime}`;
+        supVal.textContent = `${supervisorName} | ${displaySuperTime}`;
         
-        // Setup copy button
         const copyBtn = document.getElementById('btn-copy-snapshot-super');
         if (copyBtn) {
           copyBtn.onclick = () => {
-            navigator.clipboard.writeText(validRec.user).then(() => showCopyToast(`✓ Copied: ${validRec.user}`));
+            navigator.clipboard.writeText(supervisorName).then(() => showCopyToast(`✓ Copied: ${supervisorName}`));
           };
         }
       }
@@ -1232,7 +1242,7 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
   }
 
   if (!records || records.length === 0) {
-    list.innerHTML = `<div style="text-align:center; padding: 2rem; opacity:0.5; font-size:0.8rem;">No matching entries found.</div>`;
+    list.innerHTML = `<div style="text-align:center; padding: 2rem; opacity:0.5; font-size:0.8rem;">No matching entries found for today.</div>`;
     area.style.display = 'block';
     if (toggleBtn) toggleBtn.style.display = 'none';
     return;
@@ -1252,32 +1262,43 @@ function renderPortalResults(records, filterLabel = '', options = {}) {
   area.style.display = 'block';
   list.innerHTML = displayRecords.map(record => {
     let timeFormatted = '';
-    const parts = record.date.split(' ');
+    const parts = (record.date || '').split(' ');
     if (parts.length >= 2) {
       const timeParts = parts[1].split(':');
       const ampm = parts[2] || '';
       timeFormatted = `${timeParts[0]}:${timeParts[1]} ${ampm}`.trim();
     } else {
-      timeFormatted = record.date;
+      timeFormatted = record.date || '';
     }
 
     const relTime = getRelativeTimeStr(record.date);
     const displayTimestamp = relTime ? `${timeFormatted} <span style="opacity:0.6; font-size:0.75rem; font-weight:400;">(${relTime})</span>` : timeFormatted;
 
+    const busClean = record.bus || '-';
+    const stopClean = DispatchEngine.formatStopLabel(record.stop);
+    const routeMeta = DispatchEngine.getRouteMeta(record.route);
+    const supervisor = DispatchEngine.extractSupervisor(record);
+    const isDeparture = (record.type || '').toLowerCase().includes('dep') || (record.stop || '').toLowerCase().includes('dep');
+    const isArrival = (record.type || '').toLowerCase().includes('arr') || (record.stop || '').toLowerCase().includes('arr');
+
     const busEsc = (record.bus || '').replace(/'/g, "\\'");
     const opEsc = (record.operator || '').replace(/'/g, "\\'");
+    const supEsc = (supervisor || '').replace(/'/g, "\\'");
+    const stopEsc = stopClean.replace(/'/g, "\\'");
+    const isStopContext = (currentPortalFilterLabel || '').toLowerCase().includes('stop') ? 'stop' : 'bus';
+    const typeStr = record.type ? ` (${record.type})` : '';
 
     return `
       <div class="result-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 10px; padding: 0.8rem; margin-bottom: 0.5rem;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.4rem;">
-          <span style="color: var(--green); font-weight: 700; font-size: 0.95rem;">Bus ${record.bus}</span>
+          <span style="color: var(--green); font-weight: 700; font-size: 0.95rem;">Bus ${record.bus || '-'}</span>
           <span style="font-size: 0.85rem; font-weight: 600; opacity: 0.9; color: white;">${displayTimestamp}</span>
         </div>
-        ${options.hideStop ? '' : `<div style="font-size: 0.8rem; color: white; margin-bottom: 0.4rem; opacity: 0.85;">${record.stop}</div>`}
+        ${options.hideStop ? (record.type ? `<div style="font-size: 0.8rem; color: #2ecc71; font-weight:600; margin-bottom: 0.4rem;">${record.type}${supervisor ? ` • <span style="opacity:0.75; color:white; font-weight:400;">Sup: ${supervisor}</span>` : ''}</div>` : '') : `<div style="font-size: 0.8rem; color: white; margin-bottom: 0.4rem; opacity: 0.85;">${record.stop || 'Stop -'}${typeStr}${supervisor ? ` • <span style="opacity:0.75;">Sup: ${supervisor}</span>` : ''}</div>`}
         <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; opacity: 0.9; font-weight: 500; margin-top: 6px;">
-          <span>${record.operator} • <span style="opacity:0.7;">${record.route}</span></span>
+          <span>${record.operator || 'No Driver'} • <span style="opacity:0.7;">${record.route || ''}</span></span>
           <div style="display: flex; align-items: center; gap: 6px;">
-            <button class="btn-start-session-card" onclick="window.startSessionWithDispatch('${busEsc}', '${opEsc}')" title="Start Session with this Bus & Driver">
+            <button class="btn-start-session-card" onclick="window.startSessionWithDispatch('${busEsc}', '${opEsc}', '${supEsc}', '${stopEsc}', '${isStopContext}')" title="Start Session">
               <span>⚡ Start Session</span>
             </button>
             <button class="violation-btn-sm" style="width: 26px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; background: rgba(46, 204, 113, 0.1); border: 1px solid rgba(46, 204, 113, 0.2);" 
@@ -1395,6 +1416,47 @@ document.getElementById('btn-portal-refresh').addEventListener('click', () => {
   clearPortalFilter();
   fetchDispatchData('Data', false);
 });
+
+// ── Auto-Fill Shortcut Buttons in Forms ──
+const btnAutofillFlDriver = document.getElementById('fl-btn-autofill-driver');
+if (btnAutofillFlDriver) {
+  btnAutofillFlDriver.addEventListener('click', () => {
+    const busInput = document.getElementById('fl-bus-number');
+    const driverInput = document.getElementById('fl-driver-name');
+    const busVal = busInput ? busInput.value.trim() : '';
+    if (!busVal) {
+      showCopyToast('Enter Bus Number first');
+      return;
+    }
+    const matched = DispatchEngine.findActiveDriver(busVal, portalData);
+    if (matched && matched.operator) {
+      if (driverInput) driverInput.value = matched.operator;
+      showCopyToast(`✓ Loaded Driver: ${matched.operator}`);
+    } else {
+      showCopyToast(`No driver found for Bus ${busVal}`);
+    }
+  });
+}
+
+const btnAutofillSwSup = document.getElementById('sw-btn-autofill-sup');
+if (btnAutofillSwSup) {
+  btnAutofillSwSup.addEventListener('click', () => {
+    const stopInput = document.getElementById('sw-stop-num');
+    const supInput = document.getElementById('sw-supervisor-name');
+    const stopVal = stopInput ? stopInput.value.trim() : '';
+    if (!stopVal) {
+      showCopyToast('Enter Stop Number first');
+      return;
+    }
+    const sup = DispatchEngine.findSupervisorForStop(stopVal, portalData);
+    if (sup) {
+      if (supInput) supInput.value = sup;
+      showCopyToast(`✓ Loaded Supervisor: ${sup}`);
+    } else {
+      showCopyToast(`No supervisor found for Stop ${stopVal}`);
+    }
+  });
+}
 
 document.getElementById('btn-countif-connect').addEventListener('click', async () => {
   const btn = document.getElementById('btn-countif-connect');

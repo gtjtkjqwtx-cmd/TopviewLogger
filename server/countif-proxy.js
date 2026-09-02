@@ -166,109 +166,175 @@ app.post('/api/countif/login', async (req, res) => {
 });
 
 // ============================================================
-// COUNTIF.NET DISPATCH DATA SCRAPER
+// COUNTIF.NET SERVER-SIDE AUTO-AUTHENTICATION & SCRAPER
 // ============================================================
 
 import * as cheerio from 'cheerio';
 
+let countifServerSessionCookie = null;
+let countifLastLoginTime = 0;
 let dispatchServerCache = {
   data: null,
   timestamp: 0,
   cookie: null
 };
 
-app.get('/api/countif/dispatch', async (req, res) => {
-  const sessionCookie = req.query.cookie;
-
-  if (!sessionCookie) {
-    return res.status(401).json({ success: false, message: 'No session cookie provided.' });
+async function ensureCountIfSession(forceRefresh = false) {
+  if (!forceRefresh && countifServerSessionCookie && (Date.now() - countifLastLoginTime < 8 * 60 * 60 * 1000)) {
+    return countifServerSessionCookie;
   }
 
-  // Fast-path: return cached response if fetched within last 10 seconds for same session
+  console.log('[CountIfServerAuth] Initiating background server auto-login...');
+  const LOGIN_URL = 'https://www.countif.net/Account/Login.aspx';
+
+  const pageRes = await fetch(LOGIN_URL, {
+    method: 'GET',
+    headers: {
+      'User-Agent': 'TopviewLogger/11.5',
+      'Accept': 'text/html,application/xhtml+xml'
+    }
+  });
+
+  if (!pageRes.ok) {
+    throw new Error(`CountIf login page HTTP ${pageRes.status}`);
+  }
+
+  const pageHtml = await pageRes.text();
+  const initialCookies = pageRes.headers.getSetCookie ? pageRes.headers.getSetCookie() : [];
+  const cookieString = initialCookies.map(c => c.split(';')[0]).join('; ');
+
+  const viewstate = extractHiddenField(pageHtml, '__VIEWSTATE');
+  const eventTarget = extractHiddenField(pageHtml, '__EVENTTARGET') || '';
+  const eventArgument = extractHiddenField(pageHtml, '__EVENTARGUMENT') || '';
+  const viewstateGen = extractHiddenField(pageHtml, '__VIEWSTATEGENERATOR') || '';
+  const eventValidation = extractHiddenField(pageHtml, '__EVENTVALIDATION') || '';
+
+  if (!viewstate) {
+    throw new Error('Failed to harvest __VIEWSTATE token from login page.');
+  }
+
+  const formParams = new URLSearchParams();
+  formParams.append('__EVENTTARGET', eventTarget);
+  formParams.append('__EVENTARGUMENT', eventArgument);
+  formParams.append('__VIEWSTATE', viewstate);
+  if (viewstateGen) formParams.append('__VIEWSTATEGENERATOR', viewstateGen);
+  if (eventValidation) formParams.append('__EVENTVALIDATION', eventValidation);
+  formParams.append('ctl00$MainContent$LoginUser$UserName', 'fvazquez');
+  formParams.append('ctl00$MainContent$LoginUser$Password', 'Topview12345');
+  formParams.append('ctl00$MainContent$LoginUser$LoginButton', 'Log In');
+
+  const loginRes = await fetch(LOGIN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'TopviewLogger/11.5',
+      'Cookie': cookieString,
+      'Accept': 'text/html,application/xhtml+xml',
+      'Referer': LOGIN_URL
+    },
+    body: formParams.toString(),
+    redirect: 'manual'
+  });
+
+  const authCookies = loginRes.headers.getSetCookie ? loginRes.headers.getSetCookie() : [];
+  const allCookies = [...initialCookies, ...authCookies].map(c => c.split(';')[0]);
+  const finalCookieString = Array.from(new Set(allCookies)).join('; ');
+
+  countifServerSessionCookie = finalCookieString;
+  countifLastLoginTime = Date.now();
+  console.log('[CountIfServerAuth] Server auto-login complete! Session active.');
+  return countifServerSessionCookie;
+}
+
+app.get('/api/countif/dispatch', async (req, res) => {
+  let sessionCookie = req.query.cookie || countifServerSessionCookie;
+
+  if (!sessionCookie) {
+    try {
+      sessionCookie = await ensureCountIfSession();
+    } catch(err) {
+      console.error('[DispatchScraper] Initial auto-login failed:', err.message);
+      return res.status(401).json({ success: false, message: 'Auto-login failed: ' + err.message });
+    }
+  }
+
+  // Fast-path: return cached response if fetched within last 10 seconds
   if (dispatchServerCache.data && 
-      dispatchServerCache.cookie === sessionCookie && 
       (Date.now() - dispatchServerCache.timestamp < 10000)) {
     return res.json({ 
       success: true, 
       count: dispatchServerCache.data.length, 
       data: dispatchServerCache.data, 
-      cached: true 
+      cached: true,
+      sessionCookie: sessionCookie
     });
   }
 
   const REPORT_URL = 'https://www.countif.net/Administration/Reports/DispatchReport.aspx';
 
-  try {
-    // 1. Initial GET to fetch the form and ViewState tokens
+  async function scrapePage(cookieToUse) {
     const reportRes = await fetch(REPORT_URL, {
       method: 'GET',
       headers: {
-        'User-Agent': 'TopviewLogger/11.3',
-        'Cookie': sessionCookie,
+        'User-Agent': 'TopviewLogger/11.5',
+        'Cookie': cookieToUse,
         'Accept': 'text/html,application/xhtml+xml',
         'Referer': REPORT_URL
       }
     });
 
-    if (!reportRes.ok) {
-        if (reportRes.status === 302 || reportRes.status === 301) {
-            return res.status(401).json({ success: false, message: 'Session expired.' });
-        }
-        throw new Error(`Report page returned HTTP ${reportRes.status}`);
+    if (!reportRes.ok || reportRes.status === 302 || reportRes.status === 301) {
+      throw new Error('SESSION_EXPIRED');
     }
 
     const html = await reportRes.text();
     if (html.includes('LoginUser') || html.includes('Log In')) {
-        return res.status(401).json({ success: false, message: 'Session expired or invalid.' });
+      throw new Error('SESSION_EXPIRED');
     }
 
-    // 2. Extract form parameters securely using Cheerio
     const $ = cheerio.load(html);
     const params = new URLSearchParams();
     
     $('input, select, textarea').each((i, el) => {
-        const name = $(el).attr('name');
-        const value = $(el).val() || '';
-        const type = $(el).attr('type');
-        
-        if (name && type !== 'submit' && type !== 'button') {
-            if (name === 'ctl00$MainContent$ddlPageSize') {
-                params.append(name, ''); // 'All' value
-                return;
-            }
-            if ($(el).is('select') && $(el).attr('multiple')) {
-                 if (name === 'ctl00$MainContent$lstDispatchTypes') {
-                     ['1','101','2','3','4','104','7','8','9'].forEach(t => params.append(name, t));
-                 } else {
-                     $(el).find('option[selected]').each((j, opt) => params.append(name, $(opt).attr('value')));
-                 }
-                 return;
-            }
-            if ($(el).is('select') && !$(el).attr('multiple')) {
-                const selectedVal = $(el).find('option[selected]').attr('value') || $(el).find('option').first().attr('value') || '';
-                params.append(name, selectedVal);
-                return;
-            }
-            params.append(name, value);
+      const name = $(el).attr('name');
+      const value = $(el).val() || '';
+      const type = $(el).attr('type');
+      
+      if (name && type !== 'submit' && type !== 'button') {
+        if (name === 'ctl00$MainContent$ddlPageSize') {
+          params.append(name, '');
+          return;
         }
+        if ($(el).is('select') && $(el).attr('multiple')) {
+          if (name === 'ctl00$MainContent$lstDispatchTypes') {
+            ['1','101','2','3','4','104','7','8','9'].forEach(t => params.append(name, t));
+          } else {
+            $(el).find('option[selected]').each((j, opt) => params.append(name, $(opt).attr('value')));
+          }
+          return;
+        }
+        if ($(el).is('select') && !$(el).attr('multiple')) {
+          const selectedVal = $(el).find('option[selected]').attr('value') || $(el).find('option').first().attr('value') || '';
+          params.append(name, selectedVal);
+          return;
+        }
+        params.append(name, value);
+      }
     });
     
-    // Force 'All' records (overrides any default 100 selection)
     params.set('ctl00$MainContent$ddlPageSize', ''); 
-    
     params.append('ctl00$MainContent$btnSearch', 'Search');
     params.delete('__EVENTTARGET');
     params.delete('__EVENTARGUMENT');
     params.append('__EVENTTARGET', '');
     params.append('__EVENTARGUMENT', '');
 
-    // 3. POST the constructed form to trigger the GridView generation
     const postRes = await fetch(REPORT_URL, {
       method: 'POST',
       headers: {
-        'Cookie': sessionCookie,
+        'Cookie': cookieToUse,
         'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'TopviewLogger/11.3'
+        'User-Agent': 'TopviewLogger/11.5'
       },
       body: params.toString()
     });
@@ -277,21 +343,58 @@ app.get('/api/countif/dispatch', async (req, res) => {
     const $post = cheerio.load(postHtml);
     
     const rows = [];
+    const headers = [];
     $post('#MainContent_gvResults tr').each((i, row) => {
-        if (i === 0) return; // Skip Header
-        
-        const cells = $post(row).find('td, th');
-        if (cells.length >= 6) {
-            rows.push({
-                date: $post(cells[0]).text().trim(),
-                user: $post(cells[1]).text().trim(),
-                bus: $post(cells[2]).text().trim(),
-                operator: $post(cells[3]).text().trim(),
-                route: $post(cells[4]).text().trim(),
-                stop: $post(cells[5]).text().trim()
-            });
-        }
+      const cells = $post(row).find('td, th');
+      if (i === 0) {
+        cells.each((idx, el) => {
+          headers.push($post(el).text().trim().toLowerCase());
+        });
+        return;
+      }
+
+      if (cells.length >= 5) {
+        const getVal = (colKey, fallbackIdx) => {
+          const idx = headers.findIndex(h => h.includes(colKey));
+          if (idx !== -1 && cells[idx]) {
+            return $post(cells[idx]).text().trim();
+          }
+          if (fallbackIdx !== undefined && cells[fallbackIdx]) {
+            return $post(cells[fallbackIdx]).text().trim();
+          }
+          return '';
+        };
+
+        const typeVal = getVal('type', 6) || (cells[6] ? $post(cells[6]).text().trim() : '');
+
+        rows.push({
+          date: getVal('date', 0),
+          user: getVal('user', 1),
+          bus: getVal('bus', 2),
+          operator: getVal('operator', 3) || getVal('driver', 3),
+          route: getVal('route', 4),
+          stop: getVal('stop', 5),
+          type: typeVal
+        });
+      }
     });
+
+    return rows;
+  }
+
+  try {
+    let rows;
+    try {
+      rows = await scrapePage(sessionCookie);
+    } catch(scrapeErr) {
+      if (scrapeErr.message === 'SESSION_EXPIRED') {
+        console.log('[DispatchScraper] Session expired. Re-authenticating automatically in background...');
+        sessionCookie = await ensureCountIfSession(true);
+        rows = await scrapePage(sessionCookie);
+      } else {
+        throw scrapeErr;
+      }
+    }
 
     dispatchServerCache = {
       data: rows,
@@ -300,9 +403,10 @@ app.get('/api/countif/dispatch', async (req, res) => {
     };
 
     return res.json({
-        success: true,
-        count: rows.length,
-        data: rows
+      success: true,
+      count: rows.length,
+      data: rows,
+      sessionCookie: sessionCookie
     });
 
   } catch (err) {

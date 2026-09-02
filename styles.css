@@ -974,5 +974,142 @@ button:active { transform: scale(.92) !important; background: rgba(255,255,255,0
 .btn-start-session-card:hover {
   background: var(--green);
   color: #0e131a;
+  box-shadow: 0 0 10px rgba(46, 204, 113, 0.4);
 }
+
+/* ── Compact High-Density Matte Black & Ion Glow Green Cards ── */
+.portal-dense-card {
+  background: #0d1218;
+  background: linear-gradient(145deg, #111720 0%, #0a0e14 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid #2ecc71;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 0.45rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  transition: all 0.2s ease;
+}
+
+.portal-dense-card:hover {
+  border-color: rgba(46, 204, 113, 0.35);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6), 0 0 12px rgba(46, 204, 113, 0.15);
+}
+
+.pill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  line-height: 1.2;
+}
+
+.pill-bus {
+  background: rgba(46, 204, 113, 0.12);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  font-size: 0.76rem;
+  font-weight: 800;
+  font-family: monospace;
+}
+
+.pill-driver {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ecf0f1;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.pill-supervisor {
+  background: rgba(241, 196, 15, 0.1);
+  color: #f1c40f;
+  border: 1px solid rgba(241, 196, 15, 0.22);
+  font-size: 0.68rem;
+}
+
+.pill-stop {
+  background: rgba(255, 255, 255, 0.04);
+  color: #bdc3c7;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+/* ── Route Badges ── */
+.badge-route-downtown {
+  background: rgba(52, 152, 219, 0.12);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.3);
+  font-size: 0.65rem;
+}
+
+.badge-route-uptown {
+  background: rgba(46, 204, 113, 0.12);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  font-size: 0.65rem;
+}
+
+.badge-route-night {
+  background: rgba(155, 89, 182, 0.12);
+  color: #9b59b6;
+  border: 1px solid rgba(155, 89, 182, 0.3);
+  font-size: 0.65rem;
+}
+
+.badge-route-default {
+  background: rgba(149, 165, 166, 0.12);
+  color: #bdc3c7;
+  border: 1px solid rgba(149, 165, 166, 0.2);
+  font-size: 0.65rem;
+}
+
+/* ── Scan Type Badges ── */
+.pill-scan-dep {
+  background: rgba(46, 204, 113, 0.12);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.25);
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 1px 4px;
+}
+
+.pill-scan-arr {
+  background: rgba(52, 152, 219, 0.12);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.25);
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 1px 4px;
+}
+
+/* ── Form Auto-Fill Button ── */
+.btn-form-autofill {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgba(46, 204, 113, 0.12);
+  border: 1px solid rgba(46, 204, 113, 0.3);
+  color: #2ecc71;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-form-autofill:hover {
+  background: #2ecc71;
+  color: #0a0e14;
+  box-shadow: 0 0 10px rgba(46, 204, 113, 0.4);
+}
+
 

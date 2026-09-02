@@ -79,7 +79,7 @@
       <header class="view-header">
         <h1 class="glow-text">Topview Logger</h1>
         <p class="subtitle">Enter name below</p>
-        <div style="background:#2ecc71; color:black; font-size:10px; font-weight:900; padding:2px 8px; border-radius:4px; margin-top:5px; display:inline-block; letter-spacing:1px; box-shadow:0 0 10px rgba(46,204,113,0.5);">V10.0.0 CLOUD</div>
+        <div style="background:#2ecc71; color:black; font-size:10px; font-weight:900; padding:2px 8px; border-radius:4px; margin-top:5px; display:inline-block; letter-spacing:1px; box-shadow:0 0 10px rgba(46,204,113,0.5);">v10.5.0 FAST-DISPATCH</div>
       </header>
       <div class="login-form">
         <div class="input-group" style="margin-bottom:2rem;">
@@ -155,44 +155,44 @@
         <button class="icon-btn-sm btn-back" data-target="menu"><svg class="icon"><use href="#icon-chevron-left"/></svg></button>
         <h2>CountIf Connect</h2>
       </header>
-        <!-- VIEW 1: Connection Setup -->
-        <div id="countif-setup">
+        <!-- VIEW 1: Connection Setup (Fallback only) -->
+        <div id="countif-setup" style="display:none;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
             <h3 class="section-title" style="margin: 0;">Connection Setup</h3>
-            <div id="countif-status-badge" class="status-badge" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4);">
-              <div class="status-dot"></div>
-              <span>Idle</span>
+            <div id="countif-status-badge" class="status-badge" style="background: rgba(46,204,113,0.15); color: #2ecc71;">
+              <div class="status-dot" style="background:#2ecc71;"></div>
+              <span>Auto-Connected</span>
             </div>
           </div>
 
           <!-- Status timeline -->
           <div id="countif-timeline" style="margin-bottom: 1.5rem;">
-            <div class="countif-step" data-step="init">
+            <div class="countif-step complete" data-step="init">
               <div class="countif-step-indicator"></div>
               <div class="countif-step-content">
                 <span class="countif-step-label">Initialize</span>
-                <span class="countif-step-detail">Starting secure connection...</span>
+                <span class="countif-step-detail">Server auto-connected.</span>
               </div>
             </div>
-            <div class="countif-step" data-step="page_loaded">
+            <div class="countif-step complete" data-step="page_loaded">
               <div class="countif-step-indicator"></div>
               <div class="countif-step-content">
                 <span class="countif-step-label">Page Loaded</span>
-                <span class="countif-step-detail">Fetching login page tokens...</span>
+                <span class="countif-step-detail">Tokens managed by server.</span>
               </div>
             </div>
-            <div class="countif-step" data-step="tokens_harvested">
+            <div class="countif-step complete" data-step="tokens_harvested">
               <div class="countif-step-indicator"></div>
               <div class="countif-step-content">
                 <span class="countif-step-label">Tokens Acquired</span>
-                <span class="countif-step-detail">Security tokens harvested.</span>
+                <span class="countif-step-detail">Persistent session active.</span>
               </div>
             </div>
-            <div class="countif-step" data-step="authenticated">
+            <div class="countif-step complete" data-step="authenticated">
               <div class="countif-step-indicator"></div>
               <div class="countif-step-content">
                 <span class="countif-step-label">Authenticated</span>
-                <span class="countif-step-detail">Verifying credentials...</span>
+                <span class="countif-step-detail">Ready to search.</span>
               </div>
             </div>
           </div>
@@ -206,34 +206,32 @@
 
           <button id="btn-countif-connect" class="btn-primary full-width" style="margin-top: 0.5rem;">
             <svg class="icon-sm" style="margin-right:8px;"><use href="#icon-navigation"/></svg>
-            <span>Connect to Dispatch</span>
+            <span>Reconnect to Dispatch</span>
             <div class="gloss-sheen"></div>
           </button>
         </div>
 
-        <!-- VIEW 2: Active Portal -->
-        <div id="countif-portal" style="display:none;">
-          <!-- Telemetry Stats -->
-          <div class="metrics-grid" style="margin-bottom: 1.5rem;">
+        <!-- VIEW 2: Active Portal (Instant Default View) -->
+        <div id="countif-portal" style="display:block;">
+          <!-- Telemetry Stats (2 Metrics) -->
+          <div class="metrics-grid" style="margin-bottom: 1.2rem;">
             <div class="metric-card">
-              <span class="metric-label">TOTAL LOGS</span>
-              <span id="portal-results-count" class="metric-value">0</span>
+              <span class="metric-label">ACTIVE BUSES</span>
+              <span id="portal-results-count" class="metric-value" style="color:var(--green);">0</span>
             </div>
             <div class="metric-card">
-              <span class="metric-label">STATUS</span>
-              <span class="metric-value" style="color:var(--green);">SYNCED</span>
+              <span class="metric-label">LAST SYNC</span>
+              <span id="portal-last-sync-time" class="metric-value" style="font-size:0.95rem; font-weight:700;">Just now</span>
             </div>
           </div>
           
           <!-- Inline Quick Filter Inputs (Full-width, responsive) -->
           <div class="portal-quick-input-row">
             <div class="portal-input-box">
-              <span style="font-size: 0.9rem; opacity: 0.7;">🚌</span>
               <input type="text" id="portal-input-bus" placeholder="Filter by Bus # (e.g. 367)..." inputmode="numeric" />
               <button id="btn-portal-filter-bus" class="portal-input-btn">Filter Bus</button>
             </div>
             <div class="portal-input-box">
-              <span style="font-size: 0.9rem; opacity: 0.7;">📍</span>
               <input type="text" id="portal-input-stop" placeholder="Filter by Stop # (e.g. 4)..." inputmode="numeric" />
               <button id="btn-portal-filter-stop" class="portal-input-btn">Filter Stop</button>
             </div>
@@ -518,7 +516,15 @@
         <h2>New session</h2>
       </header>
       <div class="form-content">
-        <div class="input-group"><label for="sw-supervisor-name">Supervisor Name:</label><input type="text" id="sw-supervisor-name" /></div>
+        <div class="input-group">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <label for="sw-supervisor-name" style="margin:0;">Supervisor Name:</label>
+            <button type="button" id="sw-btn-autofill-sup" class="btn-form-autofill" title="Auto-fill supervisor from Dispatch">
+              <span>Dispatch</span>
+            </button>
+          </div>
+          <input type="text" id="sw-supervisor-name" placeholder="e.g. Supervisor Name" />
+        </div>
         <div class="input-group"><label for="sw-stop-num">Stop #:</label><input type="text" id="sw-stop-num" /></div>
         <div class="input-group"><label for="sw-time-started">Time Started:</label><input type="text" id="sw-time-started" readonly class="clickable-input" /></div>
         <button id="sw-btn-confirm-start" class="btn-primary"><span>Start Stopwatch</span><div class="gloss-sheen"></div></button>
@@ -636,7 +642,15 @@
       </header>
       <div class="form-content">
         <div class="input-group"><label for="fl-bus-number">Bus Number:</label><input type="text" id="fl-bus-number" placeholder="e.g. 359" /></div>
-        <div class="input-group"><label for="fl-driver-name">Driver Name:</label><input type="text" id="fl-driver-name" placeholder="e.g. John Doe" /></div>
+        <div class="input-group">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <label for="fl-driver-name" style="margin:0;">Driver Name:</label>
+            <button type="button" id="fl-btn-autofill-driver" class="btn-form-autofill" title="Auto-fill driver for this bus from Dispatch">
+              <span>Dispatch</span>
+            </button>
+          </div>
+          <input type="text" id="fl-driver-name" placeholder="e.g. John Doe" />
+        </div>
         <div class="input-group"><label for="fl-route">Route:</label><input type="text" id="fl-route" placeholder="e.g. downtown, uptown..." /></div>
         <div class="input-group"><label for="fl-stop-boarded">Stop Boarded:</label><input type="text" id="fl-stop-boarded" placeholder="1, 2, 3..." /></div>
         <div class="input-group"><label for="fl-time-started">Time On:</label><input type="text" id="fl-time-started" readonly class="clickable-input" /></div>
